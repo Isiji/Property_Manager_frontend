@@ -1,9 +1,7 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:property_manager_frontend/core/config.dart';
 import 'package:property_manager_frontend/utils/token_manager.dart';
-
-/// Adjust this to your backend base URL
-const String baseUrl = 'http://127.0.0.1:8000/auth';
 
 class AuthService {
   /// Register user
@@ -16,7 +14,7 @@ class AuthService {
     String? propertyCode,
     int? unitId,
   }) async {
-    final url = Uri.parse('$baseUrl/register');
+    final url = Uri.parse(AppConfig.registerEndpoint);
 
     final payload = {
       'name': name,
@@ -34,6 +32,10 @@ class AuthService {
       body: jsonEncode(payload),
     );
 
+    print('➡️ Sending to: $url');
+    print('📦 Payload: $payload');
+    print('⬅️ Response: ${response.statusCode} ${response.body}');
+
     if (response.statusCode == 200 || response.statusCode == 201) {
       return jsonDecode(response.body);
     } else {
@@ -47,7 +49,7 @@ class AuthService {
     String? password,
     required String role,
   }) async {
-    final url = Uri.parse('$baseUrl/login');
+    final url = Uri.parse(AppConfig.loginEndpoint);
 
     final payload = {
       'phone': phone,
@@ -60,6 +62,10 @@ class AuthService {
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode(payload),
     );
+
+    print('➡️ Sending to: $url');
+    print('📦 Payload: $payload');
+    print('⬅️ Response: ${response.statusCode} ${response.body}');
 
     if (response.statusCode == 200) {
       final data = jsonDecode(response.body);
@@ -75,16 +81,14 @@ class AuthService {
     }
   }
 
-  /// Logout user (client-side only)
   static Future<void> logout() async {
     await TokenManager.clearSession();
   }
 
-  /// Example of calling a protected endpoint
   static Future<Map<String, dynamic>> getProfile() async {
     final headers = await TokenManager.authHeaders();
     final response = await http.get(
-      Uri.parse('$baseUrl/profile'),
+      Uri.parse('${AppConfig.apiBaseUrl}/auth/profile'),
       headers: {
         'Content-Type': 'application/json',
         ...headers,
