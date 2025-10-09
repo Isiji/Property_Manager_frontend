@@ -1,3 +1,5 @@
+// ignore_for_file: avoid_print
+
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:property_manager_frontend/core/config.dart';
@@ -14,6 +16,11 @@ class AuthService {
     String? propertyCode,
     int? unitId,
   }) async {
+    // ✅ Validate password requirement for specific roles
+    if (role != 'tenant' && (password == null || password.isEmpty)) {
+      throw Exception('Password is required for $role registration.');
+    }
+
     final url = Uri.parse(AppConfig.registerEndpoint);
 
     final payload = {
@@ -26,14 +33,15 @@ class AuthService {
       'unit_id': unitId,
     }..removeWhere((_, v) => v == null);
 
+    print('➡️ Sending to: $url');
+    print('📦 Payload: $payload');
+
     final response = await http.post(
       url,
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode(payload),
     );
 
-    print('➡️ Sending to: $url');
-    print('📦 Payload: $payload');
     print('⬅️ Response: ${response.statusCode} ${response.body}');
 
     if (response.statusCode == 200 || response.statusCode == 201) {
@@ -57,20 +65,22 @@ class AuthService {
       'role': role,
     }..removeWhere((_, v) => v == null);
 
+    print('➡️ Sending to: $url');
+    print('📦 Payload: $payload');
+
     final response = await http.post(
       url,
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode(payload),
     );
 
-    print('➡️ Sending to: $url');
-    print('📦 Payload: $payload');
     print('⬅️ Response: ${response.statusCode} ${response.body}');
 
     if (response.statusCode == 200) {
       final data = jsonDecode(response.body);
       final token = data['access_token'];
       final userId = data['id'] ?? 0;
+
       await TokenManager.saveSession(
         token: token,
         role: role,
