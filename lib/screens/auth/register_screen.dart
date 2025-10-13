@@ -104,7 +104,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
                       // Role selector
                       DropdownButtonFormField<String>(
-                        value: _selectedRole,
+                        initialValue: _selectedRole,
                         items: _roles.map((r) {
                           return DropdownMenuItem(
                             value: r,

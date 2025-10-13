@@ -89,7 +89,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       const SizedBox(height: 10),
 
                       DropdownButtonFormField<String>(
-                        value: _selectedRole,
+                        initialValue: _selectedRole,
                         items: _roles.map((r) {
                           return DropdownMenuItem(
                             value: r,
