@@ -2,11 +2,14 @@
 
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:jwt_decoder/jwt_decoder.dart';
 import 'package:property_manager_frontend/core/config.dart';
 import 'package:property_manager_frontend/utils/token_manager.dart';
 
 class AuthService {
-  /// Register user
+  /// =============================
+  /// 🔹 REGISTER USER
+  /// =============================
   static Future<Map<String, dynamic>> registerUser({
     required String name,
     required String phone,
@@ -51,8 +54,10 @@ class AuthService {
     }
   }
 
-  /// Login user
-  static Future<void> loginUser({
+  /// =============================
+  /// 🔹 LOGIN USER
+  /// =============================
+  static Future<Map<String, dynamic>> loginUser({
     required String phone,
     String? password,
     required String role,
@@ -65,7 +70,7 @@ class AuthService {
       'role': role,
     }..removeWhere((_, v) => v == null);
 
-    print('➡️ Sending to: $url');
+    print('➡️ Sending login to: $url');
     print('📦 Payload: $payload');
 
     final response = await http.post(
@@ -79,22 +84,44 @@ class AuthService {
     if (response.statusCode == 200) {
       final data = jsonDecode(response.body);
       final token = data['access_token'];
-      final userId = data['id'] ?? 0;
 
+      if (token == null) {
+        throw Exception('Missing access token in response');
+      }
+
+      // ✅ Decode JWT for userId and role
+      final decoded = JwtDecoder.decode(token);
+      final userId = int.tryParse(decoded['sub'].toString()) ?? 0;
+      final roleFromToken = decoded['role'] ?? role;
+
+      print('🔑 Decoded Token: $decoded');
+      print('✅ Login successful: role=$roleFromToken, id=$userId');
+
+      // ✅ Save session
       await TokenManager.saveSession(
         token: token,
-        role: role,
+        role: roleFromToken,
         userId: userId,
       );
+
+      return {'token': token, 'role': roleFromToken, 'userId': userId};
     } else {
+      print('❌ Login failed: ${response.statusCode} ${response.body}');
       throw Exception('Login failed: ${response.body}');
     }
   }
 
+  /// =============================
+  /// 🔹 LOGOUT
+  /// =============================
   static Future<void> logout() async {
+    print('🚪 Clearing user session...');
     await TokenManager.clearSession();
   }
 
+  /// =============================
+  /// 🔹 GET PROFILE
+  /// =============================
   static Future<Map<String, dynamic>> getProfile() async {
     final headers = await TokenManager.authHeaders();
     final response = await http.get(
@@ -104,6 +131,10 @@ class AuthService {
         ...headers,
       },
     );
+
+    print('➡️ Fetching profile');
+    print('⬅️ Response: ${response.statusCode} ${response.body}');
+
     if (response.statusCode == 200) {
       return jsonDecode(response.body);
     } else {

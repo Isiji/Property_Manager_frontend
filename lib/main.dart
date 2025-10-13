@@ -1,10 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+
 import 'package:property_manager_frontend/screens/auth/login_screen.dart';
 import 'package:property_manager_frontend/screens/auth/register_screen.dart';
 import 'package:property_manager_frontend/screens/settings/settings_screen.dart';
+import 'package:property_manager_frontend/screens/dashboard/base_dashboard.dart';
+
 import 'package:property_manager_frontend/theme/app_theme.dart';
 import 'package:property_manager_frontend/providers/theme_provider.dart';
+import 'package:property_manager_frontend/utils/token_manager.dart';
+import 'package:property_manager_frontend/screens/landlord/landlord_dashboard.dart';
 
 void main() {
   runApp(
@@ -46,17 +51,56 @@ class PropSmartApp extends StatelessWidget {
       theme: light,
       darkTheme: dark,
       themeMode: themeProvider.themeMode,
-      initialRoute: '/login',
       routes: {
         '/login': (_) => const LoginScreen(),
         '/register': (_) => const RegisterScreen(),
         '/settings': (_) => const SettingsScreen(),
-        // Future dashboard routes:
-        // '/tenant_dashboard': (_) => const TenantDashboard(),
-        // '/landlord_dashboard': (_) => const LandlordDashboard(),
-        // '/manager_dashboard': (_) => const ManagerDashboard(),
-        // '/admin_dashboard': (_) => const AdminDashboard(),
+        '/dashboard': (_) => const BaseDashboard(),
+        '/landlord_dashboard': (_) => const LandlordDashboard(),
       },
+      home: const LaunchDecider(),
+    );
+  }
+}
+
+/// Decides navigation based on saved session
+class LaunchDecider extends StatefulWidget {
+  const LaunchDecider({super.key});
+
+  @override
+  State<LaunchDecider> createState() => _LaunchDeciderState();
+}
+
+class _LaunchDeciderState extends State<LaunchDecider> {
+  @override
+  void initState() {
+    super.initState();
+    _checkSession();
+  }
+
+  Future<void> _checkSession() async {
+    debugPrint('[LaunchDecider] Checking session...');
+    final session = await TokenManager.loadSession();
+
+    if (!mounted) return;
+
+    if (session != null && !session.isExpired) {
+      debugPrint(
+          '[LaunchDecider] Logged in as ${session.role} → Navigating to dashboard');
+      Navigator.of(context).pushReplacementNamed('/dashboard', arguments: {
+        'role': session.role,
+        'userId': session.userId,
+      });
+    } else {
+      debugPrint('[LaunchDecider] No active session → going to login');
+      Navigator.of(context).pushReplacementNamed('/login');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return const Scaffold(
+      body: Center(child: CircularProgressIndicator()),
     );
   }
 }

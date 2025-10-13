@@ -38,6 +38,7 @@ dependencies:
   provider: ^6.1.5+1
   shared_preferences: ^2.5.3
   jwt_decoder: ^2.0.1
+  lucide_icons: ^0.257.0
 
 dev_dependencies:
   flutter_test:
