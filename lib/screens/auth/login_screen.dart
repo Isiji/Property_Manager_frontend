@@ -1,3 +1,5 @@
+// ignore_for_file: avoid_print, use_build_context_synchronously
+
 import 'package:flutter/material.dart';
 import 'package:property_manager_frontend/services/auth_service.dart';
 
@@ -9,153 +11,145 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  final _formKey = GlobalKey<FormState>();
-  final _phoneController = TextEditingController();
-  final _passwordController = TextEditingController();
-  String _selectedRole = 'tenant';
-  bool _loading = false;
+  final TextEditingController phoneController = TextEditingController();
+  final TextEditingController passwordController = TextEditingController();
+  String selectedRole = 'landlord';
+  bool isLoading = false;
 
-  final List<String> _roles = ['tenant', 'landlord', 'manager', 'admin'];
+  final List<String> roles = ['admin', 'landlord', 'manager', 'tenant'];
 
-  Future<void> _login() async {
-    if (!_formKey.currentState!.validate()) return;
-    setState(() => _loading = true);
+  Future<void> _handleLogin() async {
+    if (phoneController.text.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Phone number is required')),
+      );
+      return;
+    }
+
+    setState(() => isLoading = true);
 
     try {
-      await AuthService.loginUser(
-        phone: _phoneController.text.trim(),
-        password: _passwordController.text.trim(),
-        role: _selectedRole,
+      final result = await AuthService.loginUser(
+        phone: phoneController.text,
+        password: passwordController.text,
+        role: selectedRole,
       );
 
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Login successful!')),
-      );
+      final role = result['role'];
+      final userId = result['userId'];
+      print('🎯 Redirecting for role=$role (User ID=$userId)');
 
-      // TODO: Navigate based on role
-      // Navigator.pushReplacementNamed(context, '/dashboard');
+      switch (role) {
+        case 'landlord':
+          Navigator.pushReplacementNamed(context, '/landlord_dashboard');
+          break;
+        case 'manager':
+          Navigator.pushReplacementNamed(context, '/manager_dashboard');
+          break;
+        case 'tenant':
+          Navigator.pushReplacementNamed(context, '/tenant_dashboard');
+          break;
+        case 'admin':
+          Navigator.pushReplacementNamed(context, '/admin_dashboard');
+          break;
+        default:
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Unknown role.')),
+          );
+      }
     } catch (e) {
+      print('❌ Login failed: $e');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Login failed: $e')),
       );
     } finally {
-      setState(() => _loading = false);
+      setState(() => isLoading = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
     return Scaffold(
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            colors: [Color(0xFF4C51BF), Color(0xFF6B73FF)],
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-          ),
-        ),
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
-            child: Card(
-              elevation: 8,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.all(20),
-                child: Form(
-                  key: _formKey,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        "Welcome back to PropSmart",
-                        style: theme.textTheme.headlineSmall?.copyWith(
-                          fontWeight: FontWeight.bold,
-                          color: Colors.deepPurple.shade700,
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                      const SizedBox(height: 20),
-
-                      _buildTextField(_phoneController, "Phone Number", Icons.phone),
-                      const SizedBox(height: 10),
-                      _buildTextField(_passwordController, "Password", Icons.lock,
-                          isPassword: true),
-                      const SizedBox(height: 10),
-
-                      DropdownButtonFormField<String>(
-                        initialValue: _selectedRole,
-                        items: _roles.map((r) {
-                          return DropdownMenuItem(
-                            value: r,
-                            child: Text(r[0].toUpperCase() + r.substring(1)),
-                          );
-                        }).toList(),
-                        onChanged: (val) {
-                          setState(() => _selectedRole = val ?? 'tenant');
-                        },
-                        decoration: const InputDecoration(
-                          labelText: "Select Role",
-                          prefixIcon: Icon(Icons.work_outline),
-                        ),
-                      ),
-
-                      const SizedBox(height: 25),
-                      SizedBox(
-                        width: double.infinity,
-                        child: ElevatedButton(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.deepPurple,
-                            padding: const EdgeInsets.symmetric(vertical: 14),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                          ),
-                          onPressed: _loading ? null : _login,
-                          child: _loading
-                              ? const CircularProgressIndicator(
-                                  color: Colors.white,
-                                )
-                              : const Text(
-                                  "Login",
-                                  style: TextStyle(fontSize: 16),
-                                ),
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      TextButton(
-                        onPressed: () =>
-                            Navigator.pushNamed(context, '/register'),
-                        child: const Text("Don't have an account? Register"),
-                      ),
-                    ],
+      backgroundColor: Colors.grey.shade100,
+      body: Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24.0),
+          child: Card(
+            elevation: 4,
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            child: Padding(
+              padding: const EdgeInsets.all(24.0),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    'PropSmart Login',
+                    style: TextStyle(
+                      fontSize: 26,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
-                ),
+                  const SizedBox(height: 24),
+                  DropdownButtonFormField<String>(
+                    value: selectedRole,
+                    items: roles
+                        .map(
+                          (r) => DropdownMenuItem(
+                            value: r,
+                            child: Text(r.toUpperCase()),
+                          ),
+                        )
+                        .toList(),
+                    decoration: const InputDecoration(
+                      labelText: 'Role',
+                      border: OutlineInputBorder(),
+                    ),
+                    onChanged: (v) {
+                      setState(() => selectedRole = v ?? 'landlord');
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: phoneController,
+                    decoration: const InputDecoration(
+                      labelText: 'Phone Number',
+                      border: OutlineInputBorder(),
+                    ),
+                    keyboardType: TextInputType.phone,
+                  ),
+                  const SizedBox(height: 16),
+                  if (selectedRole != 'tenant')
+                    TextField(
+                      controller: passwordController,
+                      obscureText: true,
+                      decoration: const InputDecoration(
+                        labelText: 'Password',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                  const SizedBox(height: 24),
+                  ElevatedButton(
+                    onPressed: isLoading ? null : _handleLogin,
+                    style: ElevatedButton.styleFrom(
+                      minimumSize: const Size(double.infinity, 50),
+                    ),
+                    child: isLoading
+                        ? const CircularProgressIndicator(
+                            color: Colors.white,
+                          )
+                        : const Text('Login'),
+                  ),
+                  const SizedBox(height: 12),
+                  TextButton(
+                    onPressed: () =>
+                        Navigator.pushReplacementNamed(context, '/register'),
+                    child: const Text("Don't have an account? Register here"),
+                  ),
+                ],
               ),
             ),
           ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildTextField(TextEditingController controller, String label, IconData icon,
-      {bool isPassword = false}) {
-    return TextFormField(
-      controller: controller,
-      obscureText: isPassword,
-      validator: (v) =>
-          (v == null || v.trim().isEmpty) ? "$label cannot be empty" : null,
-      decoration: InputDecoration(
-        labelText: label,
-        prefixIcon: Icon(icon),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
         ),
       ),
     );

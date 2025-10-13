@@ -1,185 +1,225 @@
+// ignore_for_file: avoid_print, use_build_context_synchronously
+
 import 'package:flutter/material.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:property_manager_frontend/services/property_service.dart';
 import 'package:property_manager_frontend/utils/token_manager.dart';
-//import 'package:property_manager_frontend/services/unit_service.dart';
 
 class LandlordDashboard extends StatefulWidget {
-  const LandlordDashboard({Key? key}) : super(key: key);
+  const LandlordDashboard({super.key});
 
   @override
   State<LandlordDashboard> createState() => _LandlordDashboardState();
 }
 
 class _LandlordDashboardState extends State<LandlordDashboard> {
-  int? landlordId;
-  List<dynamic> properties = [];
   bool isLoading = true;
-  int? expandedPropertyId;
-  Map<int, dynamic> propertyDetails = {};
+  List<dynamic> properties = [];
+  int? landlordId;
 
   @override
   void initState() {
     super.initState();
-    _initializeDashboard();
+    _loadLandlordProperties();
   }
 
-  Future<void> _initializeDashboard() async {
+  Future<void> _loadLandlordProperties() async {
     try {
-      print('🔹 Loading landlord session...');
-      final id = await TokenManager.currentUserId();
-      if (id == null) {
-        print('⚠️ No landlord ID found in session');
+      setState(() => isLoading = true);
+
+      landlordId = await TokenManager.currentUserId();
+      if (landlordId == null) {
+        print("❌ Landlord ID missing. Redirecting to login...");
+        Navigator.pushReplacementNamed(context, '/login');
         return;
       }
-      setState(() => landlordId = id);
-      print('✅ Landlord ID: $id');
 
-      print('🔹 Fetching landlord properties...');
-      final props = await PropertyService.getPropertiesByLandlord(id);
-      print('✅ Properties fetched: ${props.length}');
-      setState(() {
-        properties = props;
-        isLoading = false;
-      });
+      print("➡️ Fetching properties for landlord ID: $landlordId");
+      final props = await PropertyService.getPropertiesByLandlord(landlordId!);
+      print("✅ Loaded ${props.length} properties");
+      setState(() => properties = props);
     } catch (e) {
-      print('❌ Error initializing landlord dashboard: $e');
+      print("💥 Error loading properties: $e");
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Failed to load properties: $e")),
+      );
+    } finally {
       setState(() => isLoading = false);
     }
   }
 
-  Future<void> _toggleExpandProperty(int propertyId) async {
-    if (expandedPropertyId == propertyId) {
-      setState(() => expandedPropertyId = null);
-      return;
-    }
-
-    print('🔹 Expanding property $propertyId...');
+  Future<void> _deleteProperty(int propertyId) async {
     try {
-      setState(() => expandedPropertyId = propertyId);
-      if (!propertyDetails.containsKey(propertyId)) {
-        final details =
-            await PropertyService.getPropertyWithUnitsDetailed(propertyId);
-        propertyDetails[propertyId] = details;
-        print('✅ Property details loaded for $propertyId');
-      }
-    } catch (e) {
-      print('❌ Failed to load property details: $e');
+      print("🗑️ Deleting property ID: $propertyId");
+      await PropertyService.deleteProperty(propertyId);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to load property details: $e')),
+        const SnackBar(content: Text("Property deleted successfully")),
+      );
+      await _loadLandlordProperties();
+    } catch (e) {
+      print("💥 Failed to delete property: $e");
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Failed to delete property: $e")),
       );
     }
   }
 
-  Widget _buildPropertyCard(Map<String, dynamic> property) {
-    final id = property['id'];
-    final isExpanded = expandedPropertyId == id;
-    final details = propertyDetails[id];
+  Future<void> _addPropertyDialog() async {
+    final nameController = TextEditingController();
+    final addressController = TextEditingController();
 
-    return Card(
-      elevation: 2,
-      margin: const EdgeInsets.symmetric(vertical: 8),
-      child: ExpansionTile(
-        leading: const Icon(LucideIcons.home),
-        title: Text(property['name'] ?? 'Unnamed Property',
-            style: const TextStyle(fontWeight: FontWeight.w600)),
-        subtitle: Text(property['address'] ?? 'No address provided'),
-        trailing: Icon(
-          isExpanded ? LucideIcons.chevronUp : LucideIcons.chevronDown,
-          color: Theme.of(context).colorScheme.primary,
+    await showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Add New Property"),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: nameController,
+              decoration: const InputDecoration(labelText: "Property Name"),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: addressController,
+              decoration: const InputDecoration(labelText: "Address"),
+            ),
+          ],
         ),
-        onExpansionChanged: (expanded) {
-          if (expanded) _toggleExpandProperty(id);
-        },
-        children: [
-          if (details == null)
-            const Padding(
-              padding: EdgeInsets.all(12),
-              child: CircularProgressIndicator(),
-            )
-          else
-            _buildUnitList(details),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("Cancel"),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              final name = nameController.text.trim();
+              final address = addressController.text.trim();
+
+              if (name.isEmpty || address.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text("All fields are required")),
+                );
+                return;
+              }
+
+              try {
+                print("🏗️ Creating property for landlord ID: $landlordId");
+                await PropertyService.createProperty(
+                  name: name,
+                  address: address,
+                  landlordId: landlordId!,
+                );
+                Navigator.pop(context);
+                await _loadLandlordProperties();
+              } catch (e) {
+                print("💥 Failed to add property: $e");
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text("Failed to add property: $e")),
+                );
+              }
+            },
+            child: const Text("Save"),
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildUnitList(Map<String, dynamic> propertyDetails) {
-    final units = propertyDetails['units'] as List<dynamic>? ?? [];
-    if (units.isEmpty) {
-      return const Padding(
-        padding: EdgeInsets.all(12),
-        child: Text('No units registered yet'),
-      );
-    }
+  Widget _buildPropertyCard(Map<String, dynamic> property) {
+    final name = property['name'] ?? 'Unnamed';
+    final address = property['address'] ?? 'No address';
+    final propertyId = property['id'] ?? 0;
+    final code = property['property_code'] ?? 'N/A';
 
-    return Column(
-      children: units.map((u) {
-        final status = u['status'] ?? 'vacant';
-        final tenant = u['tenant'];
-        return ListTile(
-          leading: Icon(
-            status == 'occupied' ? LucideIcons.userCheck : LucideIcons.home,
-            color: status == 'occupied'
-                ? Colors.green
-                : Theme.of(context).colorScheme.primary,
-          ),
-          title: Text('Unit ${u['number']}'),
-          subtitle: Text(
-            status == 'occupied'
-                ? 'Tenant: ${tenant?['name'] ?? 'Unknown'}'
-                : 'Vacant',
-          ),
-          trailing: Text('Ksh ${u['rent_amount']}'),
-        );
-      }).toList(),
+    return Card(
+      elevation: 3,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+      child: ListTile(
+        leading: const Icon(LucideIcons.building2, color: Colors.indigo),
+        title: Text(
+          name,
+          style: const TextStyle(fontWeight: FontWeight.bold),
+        ),
+        subtitle: Text("Address: $address\nCode: $code"),
+        trailing: PopupMenuButton<String>(
+          onSelected: (value) {
+            if (value == 'view_units') {
+              Navigator.pushNamed(context, '/landlord_property_units',
+                  arguments: propertyId);
+            } else if (value == 'delete') {
+              _deleteProperty(propertyId);
+            }
+          },
+          itemBuilder: (context) => [
+            const PopupMenuItem(
+              value: 'view_units',
+              child: Row(
+                children: [
+                  Icon(LucideIcons.layoutGrid, size: 18),
+                  SizedBox(width: 8),
+                  Text('View Units'),
+                ],
+              ),
+            ),
+            const PopupMenuItem(
+              value: 'delete',
+              child: Row(
+                children: [
+                  Icon(LucideIcons.trash2, size: 18, color: Colors.red),
+                  SizedBox(width: 8),
+                  Text('Delete'),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    if (isLoading) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
-    }
-
     return Scaffold(
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () {
-          print('➕ Add Property button tapped');
-          // TODO: Navigate to property creation form
-        },
-        icon: const Icon(LucideIcons.plus),
-        label: const Text('Add Property'),
+      appBar: AppBar(
+        title: const Text("Landlord Dashboard"),
+        actions: [
+          IconButton(
+            onPressed: _addPropertyDialog,
+            icon: const Icon(LucideIcons.plus),
+            tooltip: 'Add Property',
+          ),
+          IconButton(
+            onPressed: () async {
+              await TokenManager.clearSession();
+              Navigator.pushReplacementNamed(context, '/login');
+            },
+            icon: const Icon(LucideIcons.logOut),
+            tooltip: 'Logout',
+          ),
+        ],
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: RefreshIndicator(
-          onRefresh: _initializeDashboard,
-          child: ListView(
-            children: [
-              const SizedBox(height: 12),
-              Text(
-                'Your Properties',
-                style: Theme.of(context)
-                    .textTheme
-                    .headlineSmall
-                    ?.copyWith(fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 8),
-              if (properties.isEmpty)
-                const Center(
-                  child: Padding(
-                    padding: EdgeInsets.all(20),
-                    child: Text('No properties registered yet'),
+      body: isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : properties.isEmpty
+              ? const Center(
+                  child: Text(
+                    "No properties yet. Click + to add one.",
+                    style: TextStyle(fontSize: 16),
                   ),
                 )
-              else
-                ...properties.map((p) => _buildPropertyCard(p)).toList(),
-            ],
-          ),
-        ),
+              : RefreshIndicator(
+                  onRefresh: _loadLandlordProperties,
+                  child: ListView.builder(
+                    itemCount: properties.length,
+                    itemBuilder: (context, index) =>
+                        _buildPropertyCard(properties[index]),
+                  ),
+                ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: _addPropertyDialog,
+        child: const Icon(LucideIcons.plus),
       ),
     );
   }

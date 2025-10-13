@@ -19,13 +19,11 @@ class AuthService {
     String? propertyCode,
     int? unitId,
   }) async {
-    // ✅ Validate password requirement for specific roles
     if (role != 'tenant' && (password == null || password.isEmpty)) {
       throw Exception('Password is required for $role registration.');
     }
 
     final url = Uri.parse(AppConfig.registerEndpoint);
-
     final payload = {
       'name': name,
       'phone': phone,
@@ -63,7 +61,6 @@ class AuthService {
     required String role,
   }) async {
     final url = Uri.parse(AppConfig.loginEndpoint);
-
     final payload = {
       'phone': phone,
       'password': password,
@@ -84,26 +81,27 @@ class AuthService {
     if (response.statusCode == 200) {
       final data = jsonDecode(response.body);
       final token = data['access_token'];
+      final userId = data['id'] ?? 0;
 
       if (token == null) {
         throw Exception('Missing access token in response');
       }
 
-      // ✅ Decode JWT for userId and role
+      // Decode JWT
       final decoded = JwtDecoder.decode(token);
-      final userId = int.tryParse(decoded['sub'].toString()) ?? 0;
       final roleFromToken = decoded['role'] ?? role;
 
       print('🔑 Decoded Token: $decoded');
-      print('✅ Login successful: role=$roleFromToken, id=$userId');
+      print('✅ Login success: role=$roleFromToken, id=$userId');
 
-      // ✅ Save session
+      // Save session locally
       await TokenManager.saveSession(
         token: token,
         role: roleFromToken,
         userId: userId,
       );
 
+      // Return role & token to handle redirect
       return {'token': token, 'role': roleFromToken, 'userId': userId};
     } else {
       print('❌ Login failed: ${response.statusCode} ${response.body}');
@@ -111,17 +109,11 @@ class AuthService {
     }
   }
 
-  /// =============================
-  /// 🔹 LOGOUT
-  /// =============================
   static Future<void> logout() async {
-    print('🚪 Clearing user session...');
+    print('🚪 Logging out and clearing session...');
     await TokenManager.clearSession();
   }
 
-  /// =============================
-  /// 🔹 GET PROFILE
-  /// =============================
   static Future<Map<String, dynamic>> getProfile() async {
     final headers = await TokenManager.authHeaders();
     final response = await http.get(
