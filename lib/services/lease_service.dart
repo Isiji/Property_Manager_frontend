@@ -1,5 +1,4 @@
-// lib/services/lease_service.dart
-// Creates leases (assign tenant to unit with rent & start_date).
+// ignore_for_file: avoid_print
 
 import 'dart:convert';
 import 'package:http/http.dart' as http;
@@ -7,31 +6,32 @@ import 'package:property_manager_frontend/core/config.dart';
 import 'package:property_manager_frontend/utils/token_manager.dart';
 
 class LeaseService {
-  /// Create a lease. Backend should mark as active (1) by default,
-  /// but we send it explicitly for clarity.
+  /// Create a lease
+  /// Expected backend route: POST /leases/
+  /// Payload: { tenant_id, unit_id, start_date, end_date?, rent_amount, active }
+  /// NOTE: start_date should be ISO8601 string (DateTime.toIso8601String()).
   static Future<Map<String, dynamic>> createLease({
     required int tenantId,
     required int unitId,
     required num rentAmount,
-    DateTime? startDate, // optional
+    required DateTime startDate,
     int active = 1,
+    DateTime? endDate,
   }) async {
     final headers = await TokenManager.authHeaders();
     final url = Uri.parse('${AppConfig.apiBaseUrl}/leases/');
 
-    final payload = {
+    final payload = <String, dynamic>{
       'tenant_id': tenantId,
       'unit_id': unitId,
+      'start_date': startDate.toIso8601String(),
+      'end_date': endDate?.toIso8601String(),
       'rent_amount': rentAmount,
-      if (startDate != null) 'start_date': startDate.toIso8601String(),
       'active': active,
-    };
+    }..removeWhere((k, v) => v == null);
 
-    // debug
-    // ignore: avoid_print
-    print('➡️ [LeaseService] POST $url');
-    // ignore: avoid_print
-    print('📦 Payload: $payload');
+    print('[LeaseService] POST $url');
+    print('[LeaseService] payload=$payload');
 
     final res = await http.post(
       url,
@@ -39,12 +39,64 @@ class LeaseService {
       body: jsonEncode(payload),
     );
 
-    // ignore: avoid_print
-    print('⬅️ [LeaseService] ${res.statusCode} ${res.body}');
-
+    print('[LeaseService] ← ${res.statusCode} ${res.body}');
     if (res.statusCode == 200 || res.statusCode == 201) {
       return jsonDecode(res.body) as Map<String, dynamic>;
     }
     throw Exception('Failed to create lease: ${res.statusCode} ${res.body}');
+  }
+
+  /// End (close) a lease
+  /// Expected backend route: PUT /leases/{lease_id}/end
+  /// If your backend uses a different path, tweak this endpoint accordingly.
+  static Future<Map<String, dynamic>> endLease({
+    required int leaseId,
+    DateTime? endDate,
+  }) async {
+    final headers = await TokenManager.authHeaders();
+    final url = Uri.parse('${AppConfig.apiBaseUrl}/leases/$leaseId/end');
+
+    final payload = <String, dynamic>{
+      if (endDate != null) 'end_date': endDate.toIso8601String(),
+    };
+
+    print('[LeaseService] PUT $url');
+    if (payload.isNotEmpty) print('[LeaseService] payload=$payload');
+
+    final res = await http.put(
+      url,
+      headers: {'Content-Type': 'application/json', ...headers},
+      body: payload.isEmpty ? null : jsonEncode(payload),
+    );
+
+    print('[LeaseService] ← ${res.statusCode} ${res.body}');
+    if (res.statusCode == 200) {
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    }
+    throw Exception('Failed to end lease: ${res.statusCode} ${res.body}');
+  }
+
+  /// Fetch active lease by unit (optional helper)
+  /// Expected backend route (guess): GET /leases/active?unit_id=123
+  static Future<Map<String, dynamic>?> getActiveLeaseByUnit(int unitId) async {
+    final headers = await TokenManager.authHeaders();
+    final url = Uri.parse('${AppConfig.apiBaseUrl}/leases/active?unit_id=$unitId');
+
+    print('[LeaseService] GET $url');
+    final res = await http.get(url, headers: {
+      'Content-Type': 'application/json',
+      ...headers,
+    });
+
+    print('[LeaseService] ← ${res.statusCode} ${res.body}');
+    if (res.statusCode == 200) {
+      final body = jsonDecode(res.body);
+      if (body == null || body.toString() == 'null' || (body is String && body.isEmpty)) {
+        return null;
+      }
+      return body as Map<String, dynamic>;
+    }
+    if (res.statusCode == 404) return null;
+    throw Exception('Failed to fetch active lease: ${res.statusCode} ${res.body}');
   }
 }
