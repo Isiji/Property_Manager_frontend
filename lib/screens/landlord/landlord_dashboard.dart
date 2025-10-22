@@ -1,9 +1,9 @@
-// ignore_for_file: avoid_print, use_build_context_synchronously
+// lib/screens/landlord/landlord_dashboard.dart
+// Landlord home: stats header + properties grid + add property dialog.
 
 import 'package:flutter/material.dart';
-import 'package:lucide_icons/lucide_icons.dart';
-import 'package:property_manager_frontend/services/property_service.dart';
 import 'package:property_manager_frontend/utils/token_manager.dart';
+import 'package:property_manager_frontend/services/property_service.dart';
 
 class LandlordDashboard extends StatefulWidget {
   const LandlordDashboard({super.key});
@@ -14,444 +14,476 @@ class LandlordDashboard extends StatefulWidget {
 
 class _LandlordDashboardState extends State<LandlordDashboard> {
   bool _loading = true;
-  List<dynamic> _properties = [];
   int? _landlordId;
-
-  // add-property form
-  final _formKey = GlobalKey<FormState>();
-  final _nameCtrl = TextEditingController();
-  final _addrCtrl = TextEditingController();
-
-  // edit-property form
-  final _editFormKey = GlobalKey<FormState>();
-  final _editNameCtrl = TextEditingController();
-  final _editAddrCtrl = TextEditingController();
-
-  String _search = '';
+  List<dynamic> _properties = [];
+  int _totalUnits = 0;
+  int _occupiedUnits = 0;
+  int _vacantUnits = 0;
 
   @override
   void initState() {
     super.initState();
-    _init();
+    _bootstrap();
   }
 
-  @override
-  void dispose() {
-    _nameCtrl.dispose();
-    _addrCtrl.dispose();
-    _editNameCtrl.dispose();
-    _editAddrCtrl.dispose();
-    super.dispose();
-  }
+  Future<void> _bootstrap() async {
+    debugPrint('[LandlordDashboard] init bootstrap …');
+    final session = await TokenManager.loadSession();
+    if (!mounted) return;
 
-  Future<void> _init() async {
+    if (session == null || session.role != 'landlord') {
+      debugPrint('[LandlordDashboard] no landlord session → return');
+      setState(() {
+        _loading = false;
+      });
+      return;
+    }
+
+    _landlordId = session.userId;
+
     try {
-      setState(() => _loading = true);
-      final id = await TokenManager.currentUserId();
-      final role = await TokenManager.currentRole();
-      print("🔐 landlord dashboard init => id=$id role=$role");
-
-      if (id == null || role != 'landlord') {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Invalid session. Please log in again.')),
-        );
-        Navigator.of(context).pushNamedAndRemoveUntil('/login', (_) => false);
-        return;
-      }
-      _landlordId = id;
       await _loadProperties();
     } catch (e) {
-      print('💥 init error: $e');
+      debugPrint('[LandlordDashboard] load error: $e');
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Init error: $e')),
+        SnackBar(content: Text('Failed to load properties: $e')),
       );
     } finally {
-      setState(() => _loading = false);
+      if (mounted) setState(() => _loading = false);
     }
   }
 
   Future<void> _loadProperties() async {
     if (_landlordId == null) return;
-    try {
-      setState(() => _loading = true);
-      print('➡️ GET properties for landlordId=$_landlordId');
-      final data = await PropertyService.getPropertiesByLandlord(_landlordId!);
-      print('✅ properties loaded: ${data.length}');
-      setState(() => _properties = data);
-    } catch (e) {
-      print('💥 load properties error: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to load properties: $e')),
-      );
-    } finally {
-      setState(() => _loading = false);
+    debugPrint('[LandlordDashboard] fetching properties for landlord=$_landlordId');
+    final props = await PropertyService.getPropertiesByLandlord(_landlordId!);
+    debugPrint('[LandlordDashboard] fetched ${props.length} properties');
+
+    // Optionally precompute unit stats by fetching detailed for each property
+    int total = 0, occupied = 0, vacant = 0;
+    for (final p in props) {
+      try {
+        final detailed = await PropertyService.getPropertyWithUnitsDetailed(p['id'] as int);
+        total += (detailed['total_units'] ?? 0) as int;
+        occupied += (detailed['occupied_units'] ?? 0) as int;
+        vacant += (detailed['vacant_units'] ?? 0) as int;
+      } catch (_) {
+        // ignore if endpoint not yet wired for some properties
+      }
     }
+
+    setState(() {
+      _properties = props;
+      _totalUnits = total;
+      _occupiedUnits = occupied;
+      _vacantUnits = vacant;
+    });
   }
 
-  Future<void> _submitCreate() async {
-    if (!_formKey.currentState!.validate()) return;
-    if (_landlordId == null) return;
+  Future<void> _createProperty() async {
+    final result = await showDialog<_NewPropertyData>(
+      context: context,
+      builder: (_) => const _AddPropertyDialog(),
+    );
+
+    if (result == null) return;
+
     try {
-      final name = _nameCtrl.text.trim();
-      final address = _addrCtrl.text.trim();
-      print('🏗️ create property => $name @ $address (landlordId=$_landlordId)');
-
-      await PropertyService.createProperty(
-        name: name,
-        address: address,
+      if (_landlordId == null) return;
+      final created = await PropertyService.createProperty(
+        name: result.name,
+        address: result.address,
         landlordId: _landlordId!,
+        managerId: result.managerId,
       );
-
-      _nameCtrl.clear();
-      _addrCtrl.clear();
-
+      debugPrint('[LandlordDashboard] property created: $created');
+      await _loadProperties();
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Property created')),
       );
-      await _loadProperties();
     } catch (e) {
-      print('💥 create property error: $e');
+      debugPrint('[LandlordDashboard] create property error: $e');
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to create: $e')),
+        SnackBar(content: Text('Failed to create property: $e')),
       );
     }
   }
 
-  Future<void> _openEdit(Map<String, dynamic> p) async {
-    _editNameCtrl.text = p['name'] ?? '';
-    _editAddrCtrl.text = p['address'] ?? '';
+  void _openProperty(int propertyId) {
+    debugPrint('[LandlordDashboard] open property $propertyId');
+    Navigator.of(context).pushNamed(
+      '/landlord_property_units',
+      arguments: {'propertyId': propertyId},
+    );
+  }
 
-    await showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Edit Property'),
-        content: Form(
-          key: _editFormKey,
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    return RefreshIndicator(
+      onRefresh: _loadProperties,
+      child: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          // Header / Stats
+          Wrap(
+            spacing: 16,
+            runSpacing: 16,
+            children: [
+              _StatCard(
+                title: 'Properties',
+                value: _properties.length.toString(),
+                icon: Icons.apartment_rounded,
+              ),
+              _StatCard(
+                title: 'Total Units',
+                value: _totalUnits.toString(),
+                icon: Icons.other_houses_rounded,
+              ),
+              _StatCard(
+                title: 'Occupied',
+                value: _occupiedUnits.toString(),
+                icon: Icons.person_pin_circle_rounded,
+              ),
+              _StatCard(
+                title: 'Vacant',
+                value: _vacantUnits.toString(),
+                icon: Icons.meeting_room_rounded,
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 24),
+
+          // Actions row
+          Row(
+            children: [
+              FilledButton.icon(
+                onPressed: _createProperty,
+                icon: const Icon(Icons.add_rounded),
+                label: const Text('Add Property'),
+              ),
+              const SizedBox(width: 12),
+              OutlinedButton.icon(
+                onPressed: _loadProperties,
+                icon: const Icon(Icons.refresh_rounded),
+                label: const Text('Refresh'),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 16),
+
+          // Properties grid
+          if (_properties.isEmpty)
+            _EmptyState(
+              title: 'No properties yet',
+              subtitle: 'Create your first property to get started.',
+              actionLabel: 'Add Property',
+              onAction: _createProperty,
+            )
+          else
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final width = constraints.maxWidth;
+                int crossAxisCount = 1;
+                if (width > 1200) crossAxisCount = 4;
+                else if (width > 900) crossAxisCount = 3;
+                else if (width > 600) crossAxisCount = 2;
+
+                return GridView.builder(
+                  padding: const EdgeInsets.only(top: 8),
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: _properties.length,
+                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: crossAxisCount,
+                    crossAxisSpacing: 16,
+                    mainAxisSpacing: 16,
+                    childAspectRatio: 1.45,
+                  ),
+                  itemBuilder: (_, i) {
+                    final p = _properties[i] as Map<String, dynamic>;
+                    return _PropertyCard(
+                      name: p['name'] ?? 'Property',
+                      address: p['address'] ?? '',
+                      onOpen: () => _openProperty(p['id'] as int),
+                    );
+                  },
+                );
+              },
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StatCard extends StatelessWidget {
+  final String title;
+  final String value;
+  final IconData icon;
+
+  const _StatCard({
+    required this.title,
+    required this.value,
+    required this.icon,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context);
+    return Container(
+      width: 260,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: t.colorScheme.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: t.dividerColor.withValues(alpha: .3)),
+        boxShadow: [
+          BoxShadow(
+            blurRadius: 12,
+            offset: const Offset(0, 6),
+            color: t.shadowColor.withValues(alpha: .06),
+          )
+        ],
+      ),
+      child: Row(
+        children: [
+          CircleAvatar(
+            radius: 22,
+            backgroundColor: t.colorScheme.primaryContainer,
+            child: Icon(icon, color: t.colorScheme.onPrimaryContainer),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, style: t.textTheme.labelMedium),
+                const SizedBox(height: 6),
+                Text(
+                  value,
+                  style: t.textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PropertyCard extends StatelessWidget {
+  final String name;
+  final String address;
+  final VoidCallback onOpen;
+
+  const _PropertyCard({
+    required this.name,
+    required this.address,
+    required this.onOpen,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context);
+    return InkWell(
+      onTap: onOpen,
+      borderRadius: BorderRadius.circular(16),
+      child: Ink(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: t.colorScheme.surface,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: t.dividerColor.withValues(alpha: .25)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: t.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                Icon(Icons.location_on_outlined, size: 16, color: t.hintColor),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    address,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: t.textTheme.bodySmall,
+                  ),
+                ),
+              ],
+            ),
+            const Spacer(),
+            Align(
+              alignment: Alignment.bottomRight,
+              child: FilledButton.tonalIcon(
+                onPressed: onOpen,
+                icon: const Icon(Icons.chevron_right_rounded),
+                label: const Text('Open'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _EmptyState extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final String actionLabel;
+  final VoidCallback onAction;
+
+  const _EmptyState({
+    required this.title,
+    required this.subtitle,
+    required this.actionLabel,
+    required this.onAction,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 48),
+      decoration: BoxDecoration(
+        color: t.colorScheme.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: t.dividerColor.withValues(alpha: .25)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.apartment_rounded, size: 56, color: t.hintColor),
+          const SizedBox(height: 12),
+          Text(title, style: t.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+          const SizedBox(height: 6),
+          Text(subtitle, style: t.textTheme.bodyMedium),
+          const SizedBox(height: 16),
+          FilledButton.icon(
+            onPressed: onAction,
+            icon: const Icon(Icons.add_rounded),
+            label: Text(actionLabel),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AddPropertyDialog extends StatefulWidget {
+  const _AddPropertyDialog({super.key});
+
+  @override
+  State<_AddPropertyDialog> createState() => _AddPropertyDialogState();
+}
+
+class _AddPropertyDialogState extends State<_AddPropertyDialog> {
+  final _formKey = GlobalKey<FormState>();
+  final _nameCtrl = TextEditingController();
+  final _addressCtrl = TextEditingController();
+  final _managerIdCtrl = TextEditingController();
+
+  bool _submitting = false;
+
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    _addressCtrl.dispose();
+    _managerIdCtrl.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    if (!_formKey.currentState!.validate()) return;
+    final managerId = _managerIdCtrl.text.trim().isEmpty
+        ? null
+        : int.tryParse(_managerIdCtrl.text.trim());
+    Navigator.of(context).pop(
+      _NewPropertyData(
+        name: _nameCtrl.text.trim(),
+        address: _addressCtrl.text.trim(),
+        managerId: managerId,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context);
+    return AlertDialog(
+      title: const Text('Add Property'),
+      content: Form(
+        key: _formKey,
+        child: SizedBox(
+          width: 420,
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               TextFormField(
-                controller: _editNameCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Property name',
-                  prefixIcon: Icon(LucideIcons.building2),
-                ),
-                validator: (v) =>
-                    (v == null || v.trim().isEmpty) ? 'Required' : null,
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _editAddrCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Address',
-                  prefixIcon: Icon(LucideIcons.mapPin),
-                ),
-                validator: (v) =>
-                    (v == null || v.trim().isEmpty) ? 'Required' : null,
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              if (!_editFormKey.currentState!.validate()) return;
-              try {
-                print('✏️ update propertyId=${p['id']}');
-                await PropertyService.updateProperty(
-                  propertyId: p['id'] as int,
-                  name: _editNameCtrl.text.trim(),
-                  address: _editAddrCtrl.text.trim(),
-                );
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Property updated')),
-                );
-                await _loadProperties();
-              } catch (e) {
-                print('💥 update error: $e');
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Failed to update: $e')),
-                );
-              }
-            },
-            child: const Text('Save'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _deleteProperty(int id) async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Delete Property'),
-        content: const Text(
-          'Are you sure? This will remove the property and its dependent data.',
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
-    );
-    if (confirm != true) return;
-
-    try {
-      print('🗑️ delete propertyId=$id');
-      await PropertyService.deleteProperty(id);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Property deleted')),
-      );
-      await _loadProperties();
-    } catch (e) {
-      print('💥 delete error: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to delete: $e')),
-      );
-    }
-  }
-
-  List<dynamic> get _filtered {
-    if (_search.isEmpty) return _properties;
-    final s = _search.toLowerCase();
-    return _properties.where((p) {
-      final name = (p['name'] ?? '').toString().toLowerCase();
-      final addr = (p['address'] ?? '').toString().toLowerCase();
-      final code = (p['property_code'] ?? '').toString().toLowerCase();
-      return name.contains(s) || addr.contains(s) || code.contains(s);
-    }).toList();
-  }
-
-  Widget _searchBar() {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-      child: TextField(
-        onChanged: (v) => setState(() => _search = v),
-        decoration: InputDecoration(
-          hintText: 'Search properties…',
-          prefixIcon: const Icon(LucideIcons.search),
-          filled: true,
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-          contentPadding: const EdgeInsets.symmetric(horizontal: 12),
-        ),
-      ),
-    );
-  }
-
-  Widget _addPropertyPanel() {
-    return Card(
-      margin: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-        child: Form(
-          key: _formKey,
-          child: Column(
-            children: [
-              Row(
-                children: [
-                  const Icon(LucideIcons.plusCircle, size: 20),
-                  const SizedBox(width: 8),
-                  Text(
-                    'Add Property',
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
                 controller: _nameCtrl,
                 decoration: const InputDecoration(
-                  labelText: 'Property name',
-                  hintText: 'e.g. Palm Heights',
-                  prefixIcon: Icon(LucideIcons.building2),
+                  labelText: 'Property Name',
+                  hintText: 'e.g., Riverside Park Apartments',
                 ),
                 validator: (v) =>
                     (v == null || v.trim().isEmpty) ? 'Name is required' : null,
               ),
               const SizedBox(height: 12),
               TextFormField(
-                controller: _addrCtrl,
+                controller: _addressCtrl,
                 decoration: const InputDecoration(
                   labelText: 'Address',
-                  hintText: 'e.g. 45 Sunset Blvd',
-                  prefixIcon: Icon(LucideIcons.mapPin),
                 ),
                 validator: (v) =>
                     (v == null || v.trim().isEmpty) ? 'Address is required' : null,
               ),
               const SizedBox(height: 12),
-              Align(
-                alignment: Alignment.centerRight,
-                child: ElevatedButton.icon(
-                  icon: const Icon(LucideIcons.save),
-                  label: const Text('Create'),
-                  onPressed: _submitCreate,
+              TextFormField(
+                controller: _managerIdCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Manager ID (optional)',
                 ),
+                keyboardType: TextInputType.number,
               ),
             ],
           ),
         ),
       ),
-    );
-  }
-
-  Widget _propertyCard(Map<String, dynamic> p) {
-    final id = p['id'] as int;
-    final name = p['name'] ?? '';
-    final addr = p['address'] ?? '';
-    final code = p['property_code'] ?? '—';
-
-    return Card(
-      margin: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-      elevation: 1.5,
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Row(
-          children: [
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.12),
-              ),
-              child: Icon(LucideIcons.home,
-                  color: Theme.of(context).colorScheme.primary),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(name,
-                      style: Theme.of(context).textTheme.titleMedium,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis),
-                  const SizedBox(height: 4),
-                  Text(addr,
-                      style: Theme.of(context).textTheme.bodyMedium,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      const Icon(LucideIcons.keyRound, size: 16),
-                      const SizedBox(width: 6),
-                      SelectableText(
-                        "Code: $code",
-                        style: Theme.of(context)
-                            .textTheme
-                            .labelMedium
-                            ?.copyWith(color: Colors.grey[700]),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 8),
-            Wrap(
-              spacing: 8,
-              children: [
-                OutlinedButton.icon(
-                  icon: const Icon(LucideIcons.grid, size: 18),
-                  label: const Text('View Units'),
-                  onPressed: () {
-                    Navigator.of(context).pushNamed(
-                      '/landlord_property_units',
-                      arguments: id,
-                    );
-                  },
-                ),
-                OutlinedButton.icon(
-                  icon: const Icon(LucideIcons.pencil, size: 18),
-                  label: const Text('Edit'),
-                  onPressed: () => _openEdit(p),
-                ),
-                FilledButton.icon(
-                  icon: const Icon(LucideIcons.trash2, size: 18),
-                  style: FilledButton.styleFrom(backgroundColor: Colors.red),
-                  label: const Text('Delete'),
-                  onPressed: () => _deleteProperty(id),
-                ),
-              ],
-            )
-          ],
-        ),
-      ),
-    );
-  }
-
-  PreferredSizeWidget _appBar() {
-    return AppBar(
-      title: const Text('Landlord Dashboard'),
       actions: [
-        IconButton(
-          tooltip: 'Refresh',
-          onPressed: _loadProperties,
-          icon: const Icon(LucideIcons.refreshCcw),
+        TextButton(
+          onPressed: _submitting ? null : () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
         ),
-        IconButton(
-          tooltip: 'Logout',
-          onPressed: () async {
-            await TokenManager.clearSession();
-            Navigator.of(context).pushNamedAndRemoveUntil('/login', (_) => false);
-          },
-          icon: const Icon(LucideIcons.logOut),
+        FilledButton(
+          onPressed: _submitting ? null : _submit,
+          child: const Text('Create'),
         ),
       ],
     );
   }
+}
 
-  @override
-  Widget build(BuildContext context) {
-    final list = _filtered;
-
-    return Scaffold(
-      appBar: _appBar(),
-      body: ListView(
-        children: [
-          _addPropertyPanel(),
-          _searchBar(),
-          if (_loading)
-            const Padding(
-              padding: EdgeInsets.all(32),
-              child: Center(child: CircularProgressIndicator()),
-            )
-          else if (list.isEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 40),
-              child: Column(
-                children: [
-                  const Icon(LucideIcons.folderOpen, size: 56, color: Colors.grey),
-                  const SizedBox(height: 12),
-                  const Text('No properties found.'),
-                  const SizedBox(height: 12),
-                  TextButton.icon(
-                    onPressed: _loadProperties,
-                    icon: const Icon(LucideIcons.refreshCcw),
-                    label: const Text('Reload'),
-                  ),
-                ],
-              ),
-            )
-          else
-            ...list.map((p) => _propertyCard(p as Map<String, dynamic>)).toList(),
-          const SizedBox(height: 32),
-        ],
-      ),
-    );
-  }
+class _NewPropertyData {
+  final String name;
+  final String address;
+  final int? managerId;
+  _NewPropertyData({required this.name, required this.address, this.managerId});
 }

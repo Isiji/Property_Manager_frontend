@@ -355,7 +355,9 @@ class _LandlordHomeState extends State<LandlordHome> {
       child: Padding(
         padding: const EdgeInsets.all(14),
         child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // Avatar
             Container(
               width: 44,
               height: 44,
@@ -363,10 +365,14 @@ class _LandlordHomeState extends State<LandlordHome> {
                 shape: BoxShape.circle,
                 color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.12),
               ),
-              child: Icon(LucideIcons.home,
-                  color: Theme.of(context).colorScheme.primary),
+              child: Icon(
+                LucideIcons.home,
+                color: Theme.of(context).colorScheme.primary,
+              ),
             ),
             const SizedBox(width: 14),
+
+            // Texts
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -397,33 +403,43 @@ class _LandlordHomeState extends State<LandlordHome> {
                 ],
               ),
             ),
+
             const SizedBox(width: 8),
-            Wrap(
-              spacing: 8,
-              children: [
-                OutlinedButton.icon(
-                  icon: const Icon(LucideIcons.grid, size: 18),
-                  label: const Text('View Units'),
-                  onPressed: () {
-                    Navigator.of(context).pushNamed(
-                      '/landlord_property_units',
-                      arguments: id,
-                    );
-                  },
+
+            // Actions (never overflow)
+            Flexible(
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Wrap(
+                  spacing: 8,
+                  children: [
+                    OutlinedButton.icon(
+                      icon: const Icon(LucideIcons.grid, size: 18),
+                      label: const Text('View Units'),
+                      onPressed: () {
+                        print('🧭 Open units for propertyId=$id');
+                        // IMPORTANT: your route in main.dart expects a Map with propertyId
+                        Navigator.of(context).pushNamed(
+                          '/landlord_property_units',
+                          arguments: {'propertyId': id},
+                        );
+                      },
+                    ),
+                    OutlinedButton.icon(
+                      icon: const Icon(LucideIcons.pencil, size: 18),
+                      label: const Text('Edit'),
+                      onPressed: () => _openEdit(p),
+                    ),
+                    FilledButton.icon(
+                      icon: const Icon(LucideIcons.trash2, size: 18),
+                      style: FilledButton.styleFrom(backgroundColor: Colors.red),
+                      label: const Text('Delete'),
+                      onPressed: () => _deleteProperty(id),
+                    ),
+                  ],
                 ),
-                OutlinedButton.icon(
-                  icon: const Icon(LucideIcons.pencil, size: 18),
-                  label: const Text('Edit'),
-                  onPressed: () => _openEdit(p),
-                ),
-                FilledButton.icon(
-                  icon: const Icon(LucideIcons.trash2, size: 18),
-                  style: FilledButton.styleFrom(backgroundColor: Colors.red),
-                  label: const Text('Delete'),
-                  onPressed: () => _deleteProperty(id),
-                ),
-              ],
-            )
+              ),
+            ),
           ],
         ),
       ),
