@@ -5,24 +5,22 @@ import 'package:lucide_icons/lucide_icons.dart';
 import 'package:property_manager_frontend/services/property_service.dart';
 import 'package:property_manager_frontend/utils/token_manager.dart';
 
-class LandlordDashboard extends StatefulWidget {
-  const LandlordDashboard({super.key});
+class LandlordHome extends StatefulWidget {
+  const LandlordHome({super.key});
 
   @override
-  State<LandlordDashboard> createState() => _LandlordDashboardState();
+  State<LandlordHome> createState() => _LandlordHomeState();
 }
 
-class _LandlordDashboardState extends State<LandlordDashboard> {
+class _LandlordHomeState extends State<LandlordHome> {
   bool _loading = true;
   List<dynamic> _properties = [];
   int? _landlordId;
 
-  // add-property form
   final _formKey = GlobalKey<FormState>();
   final _nameCtrl = TextEditingController();
   final _addrCtrl = TextEditingController();
 
-  // edit-property form
   final _editFormKey = GlobalKey<FormState>();
   final _editNameCtrl = TextEditingController();
   final _editAddrCtrl = TextEditingController();
@@ -49,12 +47,13 @@ class _LandlordDashboardState extends State<LandlordDashboard> {
       setState(() => _loading = true);
       final id = await TokenManager.currentUserId();
       final role = await TokenManager.currentRole();
-      print("🔐 landlord dashboard init => id=$id role=$role");
+      print("🔐 landlord home init => id=$id role=$role");
 
       if (id == null || role != 'landlord') {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Invalid session. Please log in again.')),
         );
+        if (!mounted) return;
         Navigator.of(context).pushNamedAndRemoveUntil('/login', (_) => false);
         return;
       }
@@ -62,11 +61,12 @@ class _LandlordDashboardState extends State<LandlordDashboard> {
       await _loadProperties();
     } catch (e) {
       print('💥 init error: $e');
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Init error: $e')),
       );
     } finally {
-      setState(() => _loading = false);
+      if (mounted) setState(() => _loading = false);
     }
   }
 
@@ -80,11 +80,12 @@ class _LandlordDashboardState extends State<LandlordDashboard> {
       setState(() => _properties = data);
     } catch (e) {
       print('💥 load properties error: $e');
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Failed to load properties: $e')),
       );
     } finally {
-      setState(() => _loading = false);
+      if (mounted) setState(() => _loading = false);
     }
   }
 
@@ -105,12 +106,14 @@ class _LandlordDashboardState extends State<LandlordDashboard> {
       _nameCtrl.clear();
       _addrCtrl.clear();
 
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Property created')),
       );
       await _loadProperties();
     } catch (e) {
       print('💥 create property error: $e');
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Failed to create: $e')),
       );
@@ -153,10 +156,7 @@ class _LandlordDashboardState extends State<LandlordDashboard> {
           ),
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
           ElevatedButton(
             onPressed: () async {
               if (!_editFormKey.currentState!.validate()) return;
@@ -167,6 +167,7 @@ class _LandlordDashboardState extends State<LandlordDashboard> {
                   name: _editNameCtrl.text.trim(),
                   address: _editAddrCtrl.text.trim(),
                 );
+                if (!mounted) return;
                 Navigator.pop(context);
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(content: Text('Property updated')),
@@ -174,6 +175,7 @@ class _LandlordDashboardState extends State<LandlordDashboard> {
                 await _loadProperties();
               } catch (e) {
                 print('💥 update error: $e');
+                if (!mounted) return;
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(content: Text('Failed to update: $e')),
                 );
@@ -191,9 +193,7 @@ class _LandlordDashboardState extends State<LandlordDashboard> {
       context: context,
       builder: (_) => AlertDialog(
         title: const Text('Delete Property'),
-        content: const Text(
-          'Are you sure? This will remove the property and its dependent data.',
-        ),
+        content: const Text('Are you sure? This will remove the property and its dependent data.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
           ElevatedButton(
@@ -209,12 +209,14 @@ class _LandlordDashboardState extends State<LandlordDashboard> {
     try {
       print('🗑️ delete propertyId=$id');
       await PropertyService.deleteProperty(id);
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Property deleted')),
       );
       await _loadProperties();
     } catch (e) {
       print('💥 delete error: $e');
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Failed to delete: $e')),
       );
@@ -230,6 +232,43 @@ class _LandlordDashboardState extends State<LandlordDashboard> {
       final code = (p['property_code'] ?? '').toString().toLowerCase();
       return name.contains(s) || addr.contains(s) || code.contains(s);
     }).toList();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final list = _filtered;
+
+    return ListView(
+      children: [
+        _addPropertyPanel(),
+        _searchBar(),
+        if (_loading)
+          const Padding(
+            padding: EdgeInsets.all(32),
+            child: Center(child: CircularProgressIndicator()),
+          )
+        else if (list.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 40),
+            child: Column(
+              children: [
+                const Icon(LucideIcons.folderOpen, size: 56, color: Colors.grey),
+                const SizedBox(height: 12),
+                const Text('No properties found.'),
+                const SizedBox(height: 12),
+                TextButton.icon(
+                  onPressed: _loadProperties,
+                  icon: const Icon(LucideIcons.refreshCcw),
+                  label: const Text('Reload'),
+                ),
+              ],
+            ),
+          )
+        else
+          ...list.map((p) => _propertyCard(p as Map<String, dynamic>)).toList(),
+        const SizedBox(height: 32),
+      ],
+    );
   }
 
   Widget _searchBar() {
@@ -262,10 +301,7 @@ class _LandlordDashboardState extends State<LandlordDashboard> {
                 children: [
                   const Icon(LucideIcons.plusCircle, size: 20),
                   const SizedBox(width: 8),
-                  Text(
-                    'Add Property',
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
+                  Text('Add Property', style: Theme.of(context).textTheme.titleMedium),
                 ],
               ),
               const SizedBox(height: 12),
@@ -390,67 +426,6 @@ class _LandlordDashboardState extends State<LandlordDashboard> {
             )
           ],
         ),
-      ),
-    );
-  }
-
-  PreferredSizeWidget _appBar() {
-    return AppBar(
-      title: const Text('Landlord Dashboard'),
-      actions: [
-        IconButton(
-          tooltip: 'Refresh',
-          onPressed: _loadProperties,
-          icon: const Icon(LucideIcons.refreshCcw),
-        ),
-        IconButton(
-          tooltip: 'Logout',
-          onPressed: () async {
-            await TokenManager.clearSession();
-            Navigator.of(context).pushNamedAndRemoveUntil('/login', (_) => false);
-          },
-          icon: const Icon(LucideIcons.logOut),
-        ),
-      ],
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final list = _filtered;
-
-    return Scaffold(
-      appBar: _appBar(),
-      body: ListView(
-        children: [
-          _addPropertyPanel(),
-          _searchBar(),
-          if (_loading)
-            const Padding(
-              padding: EdgeInsets.all(32),
-              child: Center(child: CircularProgressIndicator()),
-            )
-          else if (list.isEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 40),
-              child: Column(
-                children: [
-                  const Icon(LucideIcons.folderOpen, size: 56, color: Colors.grey),
-                  const SizedBox(height: 12),
-                  const Text('No properties found.'),
-                  const SizedBox(height: 12),
-                  TextButton.icon(
-                    onPressed: _loadProperties,
-                    icon: const Icon(LucideIcons.refreshCcw),
-                    label: const Text('Reload'),
-                  ),
-                ],
-              ),
-            )
-          else
-            ...list.map((p) => _propertyCard(p as Map<String, dynamic>)).toList(),
-          const SizedBox(height: 32),
-        ],
       ),
     );
   }

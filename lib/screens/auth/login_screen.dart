@@ -41,7 +41,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
       switch (role) {
         case 'landlord':
-          Navigator.pushReplacementNamed(context, '/landlord_dashboard');
+          Navigator.pushReplacementNamed(context, '/dashboard');
           break;
         case 'manager':
           Navigator.pushReplacementNamed(context, '/manager_dashboard');
