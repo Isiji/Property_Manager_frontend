@@ -1,4 +1,5 @@
-// lib/services/property_service.dart
+// ignore_for_file: avoid_print
+
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:property_manager_frontend/core/config.dart';
@@ -9,18 +10,15 @@ class PropertyService {
     final headers = await TokenManager.authHeaders();
     final url = Uri.parse('${AppConfig.apiBaseUrl}/properties/landlord/$landlordId');
 
-    // ignore: avoid_print
-    print('➡️ GET $url');
-
+    print('[PropertyService] GET $url');
     final res = await http.get(url, headers: {
       'Content-Type': 'application/json',
       ...headers,
     });
 
-    // ignore: avoid_print
-    print('⬅️ ${res.statusCode} ${res.body}');
-
+    print('[PropertyService] ← ${res.statusCode}');
     if (res.statusCode == 200) {
+      print('[PropertyService] body: ${res.body}');
       return jsonDecode(res.body) as List<dynamic>;
     }
     throw Exception('Failed to load properties: ${res.statusCode} ${res.body}');
@@ -30,28 +28,18 @@ class PropertyService {
     final headers = await TokenManager.authHeaders();
     final url = Uri.parse('${AppConfig.apiBaseUrl}/properties/$propertyId/with-units-detailed');
 
-    // ignore: avoid_print
-    print('➡️ GET $url');
+    print('[PropertyService] GET $url');
+    final res = await http.get(url, headers: {
+      'Content-Type': 'application/json',
+      ...headers,
+    });
 
-    try {
-      final res = await http.get(url, headers: {
-        'Content-Type': 'application/json',
-        ...headers,
-      });
-
-      // ignore: avoid_print
-      print('⬅️ ${res.statusCode} ${res.body}');
-
-      if (res.statusCode == 200) {
-        return jsonDecode(res.body) as Map<String, dynamic>;
-      }
-      throw Exception('Failed to load property details: ${res.statusCode} ${res.body}');
-    } catch (e) {
-      // This is what shows as “ClientException: Failed to fetch” on web when CORS blocks.
-      // ignore: avoid_print
-      print('💥 getPropertyWithUnitsDetailed error: $e');
-      rethrow;
+    print('[PropertyService] ← ${res.statusCode}');
+    if (res.statusCode == 200) {
+      print('[PropertyService] body: ${res.body}');
+      return jsonDecode(res.body) as Map<String, dynamic>;
     }
+    throw Exception('Failed to load property details: ${res.statusCode} ${res.body}');
   }
 
   static Future<Map<String, dynamic>> createProperty({
@@ -70,18 +58,14 @@ class PropertyService {
       'manager_id': managerId,
     }..removeWhere((k, v) => v == null);
 
-    // ignore: avoid_print
-    print('➡️ POST $url');
-    // ignore: avoid_print
-    print('📦 Payload: $payload');
+    print('[PropertyService] POST $url');
+    print('[PropertyService] payload: ${jsonEncode(payload)}');
 
     final res = await http.post(url,
         headers: {'Content-Type': 'application/json', ...headers},
         body: jsonEncode(payload));
 
-    // ignore: avoid_print
-    print('⬅️ ${res.statusCode} ${res.body}');
-
+    print('[PropertyService] ← ${res.statusCode} ${res.body}');
     if (res.statusCode == 200 || res.statusCode == 201) {
       return jsonDecode(res.body) as Map<String, dynamic>;
     }
@@ -103,18 +87,14 @@ class PropertyService {
       'manager_id': managerId,
     }..removeWhere((k, v) => v == null);
 
-    // ignore: avoid_print
-    print('➡️ PUT $url');
-    // ignore: avoid_print
-    print('📦 Payload: $payload');
+    print('[PropertyService] PUT $url');
+    print('[PropertyService] payload: ${jsonEncode(payload)}');
 
     final res = await http.put(url,
         headers: {'Content-Type': 'application/json', ...headers},
         body: jsonEncode(payload));
 
-    // ignore: avoid_print
-    print('⬅️ ${res.statusCode} ${res.body}');
-
+    print('[PropertyService] ← ${res.statusCode} ${res.body}');
     if (res.statusCode == 200) {
       return jsonDecode(res.body) as Map<String, dynamic>;
     }
@@ -125,17 +105,14 @@ class PropertyService {
     final headers = await TokenManager.authHeaders();
     final url = Uri.parse('${AppConfig.apiBaseUrl}/properties/$propertyId');
 
-    // ignore: avoid_print
-    print('➡️ DELETE $url');
+    print('[PropertyService] DELETE $url');
 
     final res = await http.delete(url, headers: {
       'Content-Type': 'application/json',
       ...headers,
     });
 
-    // ignore: avoid_print
-    print('⬅️ ${res.statusCode} ${res.body}');
-
+    print('[PropertyService] ← ${res.statusCode} ${res.body}');
     if (res.statusCode != 200 && res.statusCode != 204) {
       throw Exception('Failed to delete property: ${res.statusCode} ${res.body}');
     }

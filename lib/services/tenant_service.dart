@@ -6,29 +6,28 @@ import 'package:property_manager_frontend/core/config.dart';
 import 'package:property_manager_frontend/utils/token_manager.dart';
 
 class TenantService {
-  /// Create a tenant
-  /// Backend (from your router): POST /tenants/
-  /// Payload: { name, phone, email?, property_id, unit_id }
   static Future<Map<String, dynamic>> createTenant({
     required String name,
     required String phone,
     String? email,
     required int propertyId,
     required int unitId,
+    String? password,
   }) async {
     final headers = await TokenManager.authHeaders();
     final url = Uri.parse('${AppConfig.apiBaseUrl}/tenants/');
 
-    final payload = <String, dynamic>{
+    final payload = {
       'name': name,
       'phone': phone,
-      'email': email,
+      'email': email, // can be null
       'property_id': propertyId,
       'unit_id': unitId,
+      'password': password,
     }..removeWhere((k, v) => v == null);
 
     print('[TenantService] POST $url');
-    print('[TenantService] payload=$payload');
+    print('[TenantService] payload=${jsonEncode(payload)}');
 
     final res = await http.post(
       url,
@@ -40,73 +39,57 @@ class TenantService {
     if (res.statusCode == 200 || res.statusCode == 201) {
       return jsonDecode(res.body) as Map<String, dynamic>;
     }
-    throw Exception('Failed to create tenant: ${res.statusCode} ${res.body}');
+    // propagate status code for 409 handling
+    throw HttpExceptionWithStatus(res.statusCode, res.body);
   }
 
-  /// Get a tenant by id
-  static Future<Map<String, dynamic>> getTenant(int tenantId) async {
+  static Future<Map<String, dynamic>> getByPhone(String phone) async {
     final headers = await TokenManager.authHeaders();
-    final url = Uri.parse('${AppConfig.apiBaseUrl}/tenants/$tenantId');
+    final url = Uri.parse('${AppConfig.apiBaseUrl}/tenants/by-phone?phone=$phone');
 
     print('[TenantService] GET $url');
-    final res = await http.get(url, headers: {
-      'Content-Type': 'application/json',
-      ...headers,
-    });
-
+    final res = await http.get(url, headers: {'Content-Type': 'application/json', ...headers});
     print('[TenantService] ← ${res.statusCode} ${res.body}');
     if (res.statusCode == 200) {
       return jsonDecode(res.body) as Map<String, dynamic>;
     }
-    throw Exception('Failed to load tenant: ${res.statusCode} ${res.body}');
+    throw Exception('Tenant not found');
   }
 
-  /// Update a tenant
-  static Future<Map<String, dynamic>> updateTenant({
-    required int tenantId,
-    String? name,
-    String? phone,
-    String? email,
+  static Future<Map<String, dynamic>> assignExistingTenant({
+    required String phone,
+    required int unitId,
+    required num rentAmount,
+    required DateTime startDate,
   }) async {
     final headers = await TokenManager.authHeaders();
-    final url = Uri.parse('${AppConfig.apiBaseUrl}/tenants/$tenantId');
+    final url = Uri.parse('${AppConfig.apiBaseUrl}/tenants/assign-existing');
 
-    final payload = <String, dynamic>{
-      'name': name,
+    final payload = {
       'phone': phone,
-      'email': email,
-    }..removeWhere((k, v) => v == null);
+      'unit_id': unitId,
+      'rent_amount': rentAmount,
+      'start_date': startDate.toIso8601String().split('T').first,
+    };
 
-    print('[TenantService] PUT $url');
-    print('[TenantService] payload=$payload');
-
-    final res = await http.put(
-      url,
-      headers: {'Content-Type': 'application/json', ...headers},
-      body: jsonEncode(payload),
-    );
-
+    print('[TenantService] POST $url');
+    print('[TenantService] payload=${jsonEncode(payload)}');
+    final res = await http.post(url,
+        headers: {'Content-Type': 'application/json', ...headers},
+        body: jsonEncode(payload));
     print('[TenantService] ← ${res.statusCode} ${res.body}');
-    if (res.statusCode == 200) {
+    if (res.statusCode == 200 || res.statusCode == 201) {
       return jsonDecode(res.body) as Map<String, dynamic>;
     }
-    throw Exception('Failed to update tenant: ${res.statusCode} ${res.body}');
+    throw Exception('Failed to assign existing tenant: ${res.statusCode} ${res.body}');
   }
+}
 
-  /// Delete a tenant
-  static Future<void> deleteTenant(int tenantId) async {
-    final headers = await TokenManager.authHeaders();
-    final url = Uri.parse('${AppConfig.apiBaseUrl}/tenants/$tenantId');
-
-    print('[TenantService] DELETE $url');
-    final res = await http.delete(url, headers: {
-      'Content-Type': 'application/json',
-      ...headers,
-    });
-
-    print('[TenantService] ← ${res.statusCode} ${res.body}');
-    if (res.statusCode != 200 && res.statusCode != 204) {
-      throw Exception('Failed to delete tenant: ${res.statusCode} ${res.body}');
-    }
-  }
+// small helper to carry status code outward
+class HttpExceptionWithStatus implements Exception {
+  final int statusCode;
+  final String body;
+  HttpExceptionWithStatus(this.statusCode, this.body);
+  @override
+  String toString() => 'HttpExceptionWithStatus($statusCode, $body)';
 }
