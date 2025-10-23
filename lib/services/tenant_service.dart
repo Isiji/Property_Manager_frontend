@@ -10,37 +10,33 @@ class TenantService {
     required String name,
     required String phone,
     String? email,
+    String? password,
     required int propertyId,
     required int unitId,
-    String? password,
   }) async {
-    final headers = await TokenManager.authHeaders();
     final url = Uri.parse('${AppConfig.apiBaseUrl}/tenants/');
-
-    final payload = {
+    final headers = {
+      'Content-Type': 'application/json',
+      ...await TokenManager.authHeaders(),
+    };
+    final payload = <String, dynamic>{
       'name': name,
       'phone': phone,
-      'email': email, // can be null
+      'email': email,         // backend now allows null
+      'password': password,   // backend now allows null
       'property_id': propertyId,
       'unit_id': unitId,
-      'password': password,
     }..removeWhere((k, v) => v == null);
 
     print('[TenantService] POST $url');
-    print('[TenantService] payload=${jsonEncode(payload)}');
+    print('[TenantService] payload=$payload');
 
-    final res = await http.post(
-      url,
-      headers: {'Content-Type': 'application/json', ...headers},
-      body: jsonEncode(payload),
-    );
-
-    print('[TenantService] ← ${res.statusCode} ${res.body}');
+    final res = await http.post(url, headers: headers, body: jsonEncode(payload));
+    print('[TenantService] ← ${res.statusCode}');
     if (res.statusCode == 200 || res.statusCode == 201) {
       return jsonDecode(res.body) as Map<String, dynamic>;
     }
-    // propagate status code for 409 handling
-    throw HttpExceptionWithStatus(res.statusCode, res.body);
+    throw Exception('Failed to create tenant: ${res.statusCode}\n${res.body}');
   }
 
   static Future<Map<String, dynamic>> getByPhone(String phone) async {

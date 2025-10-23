@@ -1,5 +1,6 @@
 // lib/screens/landlord/landlord_property_units.dart
-// ignore_for_file: avoid_print, use_build_context_synchronously
+// Property detail: shows property info & code, units list,
+// add/edit/delete unit, Assign Tenant, and End Lease actions.
 
 import 'package:flutter/material.dart';
 import 'package:property_manager_frontend/services/property_service.dart';
@@ -9,7 +10,7 @@ import 'package:property_manager_frontend/services/lease_service.dart';
 
 class LandlordPropertyUnits extends StatefulWidget {
   final int propertyId;
-  const LandlordPropertyUnits({super.key, required this.propertyId});
+  const LandlordPropertyUnits({Key? key, required this.propertyId}) : super(key: key);
 
   @override
   State<LandlordPropertyUnits> createState() => _LandlordPropertyUnitsState();
@@ -28,16 +29,15 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
 
   Future<void> _loadDetailed() async {
     try {
+      debugPrint('➡️ [PropertyUnits] GET /properties/${widget.propertyId}/with-units-detailed');
       final detail = await PropertyService.getPropertyWithUnitsDetailed(widget.propertyId);
-      debugPrint('[PropertyUnits] parsed detail: $detail');
+      debugPrint('⬅️ [PropertyUnits] OK -> ${detail['name']}');
+      if (!mounted) return;
       setState(() {
         _property = detail;
         _units = (detail['units'] as List<dynamic>? ?? []);
         _loading = false;
       });
-      if (_units.isNotEmpty) {
-        debugPrint('[PropertyUnits] first unit: ${_units.first}');
-      }
     } catch (e) {
       debugPrint('[PropertyUnits] load error: $e');
       if (!mounted) return;
@@ -130,7 +130,7 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
       debugPrint('[PropertyUnits] delete unit error: $e');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to delete: $e')),
+        SnackBar(content: Text('Failed to delete unit: $e')),
       );
     }
   }
@@ -149,7 +149,7 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
       final propertyId = _property?['id'] as int? ?? widget.propertyId;
       final unitId = unit['id'] as int;
 
-      // 1) create tenant
+      debugPrint("👤 [Tenant] CREATE -> name=${data.name} phone=${data.phone} prop=$propertyId unit=$unitId");
       final tenant = await TenantService.createTenant(
         name: data.name,
         phone: data.phone,
@@ -163,14 +163,23 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
         throw Exception('Backend did not return tenant id');
       }
 
-      // 2) create lease
+      // date-only string YYYY-MM-DD
+      final today = DateTime.now();
+      final String isoDate =
+          DateTime(today.year, today.month, today.day).toIso8601String().split('T').first;
+
+      debugPrint("📄 [Lease] CREATE -> tenant=$tenantId unit=$unitId rent=${data.rentAmount}");
       await LeaseService.createLease(
         tenantId: tenantId,
         unitId: unitId,
         rentAmount: data.rentAmount,
-        startDate: DateTime.now(),
+        startDate: isoDate, // String (date only)
         active: 1,
       );
+
+      // Mark unit occupied (defensive)
+      debugPrint("🏷️ [Unit] mark OCCUPIED -> id=$unitId");
+      await UnitService.updateUnit(unitId: unitId, occupied: 1);
 
       await _loadDetailed();
       if (!mounted) return;
@@ -186,28 +195,71 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
     }
   }
 
+  Future<void> _endLease(Map<String, dynamic> unit) async {
+    final leaseId = (unit['lease']?['id'] as num?)?.toInt();
+    if (leaseId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No active lease to end')),
+      );
+      return;
+    }
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('End Lease'),
+        content: const Text('End current lease and mark unit as vacant?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('End Lease')),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+
+    try {
+      final today = DateTime.now();
+      final String isoDate =
+          DateTime(today.year, today.month, today.day).toIso8601String().split('T').first;
+
+      await LeaseService.endLease(leaseId: leaseId, endDate: isoDate);
+      await UnitService.updateUnit(unitId: (unit['id'] as num).toInt(), occupied: 0);
+
+      await _loadDetailed();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Lease ended and unit marked vacant')),
+      );
+    } catch (e) {
+      debugPrint('[PropertyUnits] end lease error: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to end lease: $e')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context);
 
     if (_loading) {
-      return const Center(child: CircularProgressIndicator());
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
     }
 
     if (_property == null) {
-      return const Center(child: Text('Property not found'));
+      return const Scaffold(
+        body: Center(child: Text('Property not found')),
+      );
     }
 
     final name = _property!['name'] ?? 'Property';
     final address = _property!['address'] ?? '';
     final code = _property!['property_code'] ?? '—';
     final total = _property!['total_units'] ?? _units.length;
-    final occupied = _property!['occupied_units'] ?? (_units.where((u) {
-      final status = (u['status'] ?? '').toString().toLowerCase();
-      final occFlag = (u['occupied'] ?? 0) == 1;
-      final hasTenant = u['tenant'] != null;
-      return status == 'occupied' || occFlag || hasTenant;
-    }).length);
+    final occupied = _property!['occupied_units'] ?? (_units.where((u) => (u['status'] ?? '') == 'occupied').length);
     final vacant = _property!['vacant_units'] ?? (total - occupied);
 
     return Scaffold(
@@ -301,50 +353,57 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
                     DataColumn(label: Text('Unit')),
                     DataColumn(label: Text('Rent Amount')),
                     DataColumn(label: Text('Status')),
-                    DataColumn(label: Text('Tenant')),
+                    DataColumn(label: Text('Tenant (Name • Phone)')),
                     DataColumn(label: Text('Actions')),
                   ],
                   rows: _units.map((u) {
-                    final rawStatus = (u['status'] ?? 'vacant').toString().toLowerCase();
-                    final occFlag = (u['occupied'] ?? 0) == 1;
-                    final hasTenant = u['tenant'] != null;
-                    final status = (rawStatus == 'occupied' || occFlag || hasTenant) ? 'occupied' : 'vacant';
+                    final status = (u['status'] ?? 'vacant').toString().toLowerCase();
                     final rent = (u['rent_amount'] ?? '').toString();
-                    final tenantName = (u['tenant']?['name'] ?? '—').toString();
                     final id = (u['id'] as num?)?.toInt() ?? 0;
+
+                    final tenantName = (u['tenant']?['name'] ?? '—').toString();
+                    final tenantPhone = (u['tenant']?['phone'] ?? '—').toString();
+                    final tenantDisplay = u['tenant'] == null ? '—' : '$tenantName • $tenantPhone';
 
                     return DataRow(
                       cells: [
                         DataCell(Text(u['number']?.toString() ?? '—')),
                         DataCell(Text(rent)),
                         DataCell(_statusChip(status, t)),
-                        DataCell(Text(tenantName)),
+                        DataCell(Text(tenantDisplay)),
                         DataCell(Row(
                           children: [
-                            if (status == 'vacant')
-                              FilledButton.tonal(
-                                onPressed: () => _assignTenant(u as Map<String, dynamic>),
-                                child: const Text('Assign Tenant'),
-                              ),
-                            if (status == 'occupied') ...[
-                              IconButton(
-                                tooltip: 'Edit Unit',
-                                onPressed: () => _editUnit(u as Map<String, dynamic>),
-                                icon: const Icon(Icons.edit_outlined),
-                              ),
-                            ] else ...[
-                              IconButton(
-                                tooltip: 'Edit Unit',
-                                onPressed: () => _editUnit(u as Map<String, dynamic>),
-                                icon: const Icon(Icons.edit_outlined),
-                              ),
-                              const SizedBox(width: 8),
-                              IconButton(
-                                tooltip: 'Delete Unit',
-                                onPressed: () => _deleteUnit(id),
-                                icon: const Icon(Icons.delete_outline),
-                              ),
-                            ],
+                            PopupMenuButton<String>(
+                              onSelected: (value) {
+                                switch (value) {
+                                  case 'assign':
+                                    _assignTenant(u as Map<String, dynamic>);
+                                    break;
+                                  case 'edit':
+                                    _editUnit(u as Map<String, dynamic>);
+                                    break;
+                                  case 'delete':
+                                    _deleteUnit(id);
+                                    break;
+                                  case 'end_lease':
+                                    _endLease(u as Map<String, dynamic>);
+                                    break;
+                                }
+                              },
+                              itemBuilder: (context) {
+                                final items = <PopupMenuEntry<String>>[];
+                                if (status == 'vacant') {
+                                  items.add(const PopupMenuItem(value: 'assign', child: Text('👤 Assign Tenant')));
+                                } else {
+                                  items.add(const PopupMenuItem(value: 'end_lease', child: Text('🔚 End Lease')));
+                                }
+                                items.addAll(const [
+                                  PopupMenuItem(value: 'edit', child: Text('✏️ Edit Unit')),
+                                  PopupMenuItem(value: 'delete', child: Text('🗑️ Delete Unit')),
+                                ]);
+                                return items;
+                              },
+                            ),
                           ],
                         )),
                       ],
@@ -412,7 +471,7 @@ class _UnitDialog extends StatefulWidget {
   final String? initialNumber;
   final String? initialRent;
 
-  const _UnitDialog({super.key, this.initialNumber, this.initialRent});
+  const _UnitDialog({Key? key, this.initialNumber, this.initialRent}) : super(key: key);
 
   @override
   State<_UnitDialog> createState() => _UnitDialogState();
@@ -474,7 +533,8 @@ class _UnitDialogState extends State<_UnitDialog> {
               TextFormField(
                 controller: _rentCtrl,
                 decoration: const InputDecoration(
-                  labelText: 'Rent Amount'),
+                  labelText: 'Rent Amount',
+                ),
                 keyboardType: TextInputType.number,
                 validator: (v) =>
                     (v == null || v.trim().isEmpty) ? 'Rent amount is required' : null,
@@ -500,7 +560,7 @@ class _UnitData {
 class _AssignTenantDialog extends StatefulWidget {
   final String unitLabel;
   final String? initialRent;
-  const _AssignTenantDialog({super.key, required this.unitLabel, this.initialRent});
+  const _AssignTenantDialog({Key? key, required this.unitLabel, this.initialRent}) : super(key: key);
 
   @override
   State<_AssignTenantDialog> createState() => _AssignTenantDialogState();
