@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:property_manager_frontend/screens/landlord/landlord_payouts.dart';
 import 'package:provider/provider.dart';
 
 import 'package:property_manager_frontend/screens/auth/login_screen.dart';
@@ -68,6 +69,7 @@ class PropSmartApp extends StatelessWidget {
         '/manager_dashboard': (_) => const DashboardShell(),
         '/admin_dashboard': (_) => const DashboardShell(),
         '/tenant_dashboard': (_) => const DashboardShell(),
+        '/landlord_payouts': (_) => const LandlordPayoutsScreen(),
 
         // ✅ Landlord’s property units page; accepts either an int or {propertyId: int}
         '/landlord_property_units': (context) {

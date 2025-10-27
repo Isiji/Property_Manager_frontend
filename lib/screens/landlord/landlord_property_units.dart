@@ -348,6 +348,12 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
         title: Text(name),
         actions: [
           IconButton(
+            tooltip: 'Payout Methods',
+            onPressed: () => Navigator.of(context).pushNamed('/landlord_payouts'),
+            icon: const Icon(Icons.account_balance_wallet_outlined),
+          ),
+
+          IconButton(
             onPressed: _loadDetailed,
             tooltip: 'Refresh',
             icon: const Icon(Icons.refresh_rounded),
