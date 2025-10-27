@@ -1,12 +1,13 @@
 // lib/screens/landlord/landlord_property_units.dart
-// Property detail: shows property info & code, units list,
-// add/edit/delete unit, Assign Tenant, and End Lease actions.
+// UPDATED: shows monthly rent status (Paid/Unpaid), tenant phone,
+// and actions for Record Payment & Send Reminder.
 
 import 'package:flutter/material.dart';
 import 'package:property_manager_frontend/services/property_service.dart';
 import 'package:property_manager_frontend/services/unit_service.dart';
 import 'package:property_manager_frontend/services/tenant_service.dart';
 import 'package:property_manager_frontend/services/lease_service.dart';
+import 'package:property_manager_frontend/services/payment_service.dart';
 
 class LandlordPropertyUnits extends StatefulWidget {
   final int propertyId;
@@ -18,33 +19,63 @@ class LandlordPropertyUnits extends StatefulWidget {
 
 class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
   bool _loading = true;
-  Map<String, dynamic>? _property; // id, name, address, property_code, totals
+  Map<String, dynamic>? _property; // detail
   List<dynamic> _units = [];
 
-  @override
-  void initState() {
-    super.initState();
-    _loadDetailed();
+  // rent status cache: unit_id -> { paid: bool, lease_id: int?, amount_due, ... }
+  Map<int, Map<String, dynamic>> _rentStatus = {};
+
+  String _currentPeriod() {
+    final now = DateTime.now();
+    final mm = now.month.toString().padLeft(2, '0');
+    return '${now.year}-$mm'; // YYYY-MM
+  }
+
+  String _todayDate() {
+    final now = DateTime.now();
+    final d = DateTime(now.year, now.month, now.day);
+    return d.toIso8601String().split('T').first; // YYYY-MM-DD
   }
 
   Future<void> _loadDetailed() async {
     try {
-      debugPrint('➡️ [PropertyUnits] GET /properties/${widget.propertyId}/with-units-detailed');
+      setState(() => _loading = true);
       final detail = await PropertyService.getPropertyWithUnitsDetailed(widget.propertyId);
-      debugPrint('⬅️ [PropertyUnits] OK -> ${detail['name']}');
       if (!mounted) return;
       setState(() {
         _property = detail;
         _units = (detail['units'] as List<dynamic>? ?? []);
-        _loading = false;
       });
+      await _loadRentStatus();
     } catch (e) {
       debugPrint('[PropertyUnits] load error: $e');
       if (!mounted) return;
-      setState(() => _loading = false);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Failed to load property details: $e')),
       );
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _loadRentStatus() async {
+    try {
+      if (_property == null) return;
+      final period = _currentPeriod();
+      final rs = await PaymentService.getStatusByProperty(
+        propertyId: _property!['id'] as int,
+        period: period,
+      );
+      // Map by unit_id
+      final Map<int, Map<String, dynamic>> m = {};
+      for (final it in (rs['items'] as List<dynamic>? ?? [])) {
+        final unitId = (it['unit_id'] as num).toInt();
+        m[unitId] = Map<String, dynamic>.from(it as Map);
+      }
+      if (!mounted) return;
+      setState(() => _rentStatus = m);
+    } catch (e) {
+      debugPrint('[PropertyUnits] rent status error: $e');
     }
   }
 
@@ -54,7 +85,6 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
       builder: (_) => const _UnitDialog(),
     );
     if (data == null) return;
-
     try {
       await UnitService.createUnit(
         propertyId: widget.propertyId,
@@ -84,7 +114,6 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
       ),
     );
     if (data == null) return;
-
     try {
       await UnitService.updateUnit(
         unitId: unit['id'] as int,
@@ -149,7 +178,6 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
       final propertyId = _property?['id'] as int? ?? widget.propertyId;
       final unitId = unit['id'] as int;
 
-      debugPrint("👤 [Tenant] CREATE -> name=${data.name} phone=${data.phone} prop=$propertyId unit=$unitId");
       final tenant = await TenantService.createTenant(
         name: data.name,
         phone: data.phone,
@@ -163,22 +191,15 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
         throw Exception('Backend did not return tenant id');
       }
 
-      // date-only string YYYY-MM-DD
-      final today = DateTime.now();
-      final String isoDate =
-          DateTime(today.year, today.month, today.day).toIso8601String().split('T').first;
-
-      debugPrint("📄 [Lease] CREATE -> tenant=$tenantId unit=$unitId rent=${data.rentAmount}");
+      final today = _todayDate(); // YYYY-MM-DD
       await LeaseService.createLease(
         tenantId: tenantId,
         unitId: unitId,
         rentAmount: data.rentAmount,
-        startDate: isoDate, // String (date only)
+        startDate: today, // backend expects date-only
         active: 1,
       );
 
-      // Mark unit occupied (defensive)
-      debugPrint("🏷️ [Unit] mark OCCUPIED -> id=$unitId");
       await UnitService.updateUnit(unitId: unitId, occupied: 1);
 
       await _loadDetailed();
@@ -218,13 +239,9 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
     if (confirm != true) return;
 
     try {
-      final today = DateTime.now();
-      final String isoDate =
-          DateTime(today.year, today.month, today.day).toIso8601String().split('T').first;
-
-      await LeaseService.endLease(leaseId: leaseId, endDate: isoDate);
+      final today = _todayDate();
+      await LeaseService.endLease(leaseId: leaseId, endDate: today);
       await UnitService.updateUnit(unitId: (unit['id'] as num).toInt(), occupied: 0);
-
       await _loadDetailed();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -239,20 +256,84 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
     }
   }
 
+  Future<void> _recordPayment(Map<String, dynamic> unit) async {
+    final leaseId = (unit['lease']?['id'] as num?)?.toInt();
+    if (leaseId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No active lease to record payment against')),
+      );
+      return;
+    }
+
+    final rent = (unit['rent_amount'] ?? '').toString();
+
+    final amount = await showDialog<num?>(
+      context: context,
+      builder: (_) => _PaymentDialog(initialAmount: rent),
+    );
+    if (amount == null) return;
+
+    try {
+      final period = _currentPeriod();     // YYYY-MM for the month
+      final paidDate = _todayDate();       // YYYY-MM-DD
+      await PaymentService.recordPayment(
+        leaseId: leaseId,
+        period: period,
+        amount: amount,
+        paidDate: paidDate,
+      );
+      await _loadRentStatus();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Payment recorded')),
+      );
+    } catch (e) {
+      debugPrint('[PropertyUnits] record payment error: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to record payment: $e')),
+      );
+    }
+  }
+
+  Future<void> _sendReminder(Map<String, dynamic> unit) async {
+    final leaseId = (unit['lease']?['id'] as num?)?.toInt();
+    if (leaseId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No active lease for reminder')),
+      );
+      return;
+    }
+    try {
+      await PaymentService.sendReminder(leaseId: leaseId);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Reminder queued')),
+      );
+    } catch (e) {
+      debugPrint('[PropertyUnits] reminder error: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to send reminder: $e')),
+      );
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _loadDetailed();
+  }
+
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context);
 
     if (_loading) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
-
     if (_property == null) {
-      return const Scaffold(
-        body: Center(child: Text('Property not found')),
-      );
+      return const Scaffold(body: Center(child: Text('Property not found')));
     }
 
     final name = _property!['name'] ?? 'Property';
@@ -267,8 +348,8 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
         title: Text(name),
         actions: [
           IconButton(
-            tooltip: 'Refresh',
             onPressed: _loadDetailed,
+            tooltip: 'Refresh',
             icon: const Icon(Icons.refresh_rounded),
           ),
           const SizedBox(width: 8),
@@ -277,13 +358,13 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          // Property top card
+          // header
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
               color: t.colorScheme.surface,
               borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: t.dividerColor.withValues(alpha: .25)),
+              border: Border.all(color: t.dividerColor.withOpacity(.25)),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -316,7 +397,7 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
 
           Row(
             children: [
-              Text('Units', style: t.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
+              Text('Units • ${_currentPeriod()}', style: t.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
               const Spacer(),
               FilledButton.icon(
                 onPressed: _addUnit,
@@ -334,7 +415,7 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
               decoration: BoxDecoration(
                 color: t.colorScheme.surface,
                 borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: t.dividerColor.withValues(alpha: .25)),
+                border: Border.all(color: t.dividerColor.withOpacity(.25)),
               ),
               child: const Text('No units yet'),
             )
@@ -344,26 +425,32 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
               color: t.colorScheme.surface,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(16),
-                side: BorderSide(color: t.dividerColor.withValues(alpha: .25)),
+                side: BorderSide(color: t.dividerColor.withOpacity(.25)),
               ),
               child: SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
                 child: DataTable(
                   columns: const [
                     DataColumn(label: Text('Unit')),
-                    DataColumn(label: Text('Rent Amount')),
+                    DataColumn(label: Text('Rent')),
                     DataColumn(label: Text('Status')),
                     DataColumn(label: Text('Tenant (Name • Phone)')),
+                    DataColumn(label: Text('This Month')),
                     DataColumn(label: Text('Actions')),
                   ],
                   rows: _units.map((u) {
+                    final unitId = (u['id'] as num).toInt();
                     final status = (u['status'] ?? 'vacant').toString().toLowerCase();
                     final rent = (u['rent_amount'] ?? '').toString();
-                    final id = (u['id'] as num?)?.toInt() ?? 0;
 
                     final tenantName = (u['tenant']?['name'] ?? '—').toString();
                     final tenantPhone = (u['tenant']?['phone'] ?? '—').toString();
                     final tenantDisplay = u['tenant'] == null ? '—' : '$tenantName • $tenantPhone';
+
+                    final rs = _rentStatus[unitId];
+                    final paid = rs?['paid'] == true;
+                    final amountDue = rs?['amount_due'];
+                    final leaseId = (rs?['lease_id'] as num?)?.toInt();
 
                     return DataRow(
                       cells: [
@@ -371,6 +458,7 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
                         DataCell(Text(rent)),
                         DataCell(_statusChip(status, t)),
                         DataCell(Text(tenantDisplay)),
+                        DataCell(_rentChip(paid, amountDue, t)),
                         DataCell(Row(
                           children: [
                             PopupMenuButton<String>(
@@ -379,14 +467,20 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
                                   case 'assign':
                                     _assignTenant(u as Map<String, dynamic>);
                                     break;
+                                  case 'end_lease':
+                                    _endLease(u as Map<String, dynamic>);
+                                    break;
                                   case 'edit':
                                     _editUnit(u as Map<String, dynamic>);
                                     break;
                                   case 'delete':
-                                    _deleteUnit(id);
+                                    _deleteUnit(unitId);
                                     break;
-                                  case 'end_lease':
-                                    _endLease(u as Map<String, dynamic>);
+                                  case 'record':
+                                    _recordPayment(u as Map<String, dynamic>);
+                                    break;
+                                  case 'remind':
+                                    _sendReminder(u as Map<String, dynamic>);
                                     break;
                                 }
                               },
@@ -394,13 +488,17 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
                                 final items = <PopupMenuEntry<String>>[];
                                 if (status == 'vacant') {
                                   items.add(const PopupMenuItem(value: 'assign', child: Text('👤 Assign Tenant')));
+                                  items.add(const PopupMenuItem(value: 'edit', child: Text('✏️ Edit Unit')));
+                                  items.add(const PopupMenuItem(value: 'delete', child: Text('🗑️ Delete Unit')));
                                 } else {
                                   items.add(const PopupMenuItem(value: 'end_lease', child: Text('🔚 End Lease')));
+                                  if (!(rs?['paid'] == true)) {
+                                    items.add(const PopupMenuItem(value: 'record', child: Text('💵 Record Payment')));
+                                    items.add(const PopupMenuItem(value: 'remind', child: Text('📣 Send Reminder')));
+                                  }
+                                  items.add(const PopupMenuItem(value: 'edit', child: Text('✏️ Edit Unit')));
+                                  items.add(const PopupMenuItem(value: 'delete', child: Text('🗑️ Delete Unit')));
                                 }
-                                items.addAll(const [
-                                  PopupMenuItem(value: 'edit', child: Text('✏️ Edit Unit')),
-                                  PopupMenuItem(value: 'delete', child: Text('🗑️ Delete Unit')),
-                                ]);
                                 return items;
                               },
                             ),
@@ -422,15 +520,32 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: isOcc
-            ? t.colorScheme.primaryContainer
-            : t.colorScheme.secondaryContainer,
+        color: isOcc ? t.colorScheme.primaryContainer : t.colorScheme.secondaryContainer,
         borderRadius: BorderRadius.circular(999),
       ),
       child: Text(
         isOcc ? 'Occupied' : 'Vacant',
         style: t.textTheme.labelMedium?.copyWith(
           color: isOcc ? t.colorScheme.onPrimaryContainer : t.colorScheme.onSecondaryContainer,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
+
+  Widget _rentChip(bool paid, dynamic amountDue, ThemeData t) {
+    final isPaid = paid == true;
+    final label = isPaid ? 'Paid' : (amountDue != null ? 'Unpaid • $amountDue' : 'Unpaid');
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: isPaid ? t.colorScheme.tertiaryContainer : t.colorScheme.errorContainer,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        label,
+        style: t.textTheme.labelMedium?.copyWith(
+          color: isPaid ? t.colorScheme.onTertiaryContainer : t.colorScheme.onErrorContainer,
           fontWeight: FontWeight.w700,
         ),
       ),
@@ -452,7 +567,7 @@ class _InfoChip extends StatelessWidget {
       decoration: BoxDecoration(
         color: t.colorScheme.surface,
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: t.dividerColor.withValues(alpha: .25)),
+        border: Border.all(color: t.dividerColor.withOpacity(.25)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -526,8 +641,7 @@ class _UnitDialogState extends State<_UnitDialog> {
                 decoration: const InputDecoration(
                   labelText: 'Unit Number/Name',
                 ),
-                validator: (v) =>
-                    (v == null || v.trim().isEmpty) ? 'Unit number is required' : null,
+                validator: (v) => (v == null || v.trim().isEmpty) ? 'Unit number is required' : null,
               ),
               const SizedBox(height: 12),
               TextFormField(
@@ -536,10 +650,69 @@ class _UnitDialogState extends State<_UnitDialog> {
                   labelText: 'Rent Amount',
                 ),
                 keyboardType: TextInputType.number,
-                validator: (v) =>
-                    (v == null || v.trim().isEmpty) ? 'Rent amount is required' : null,
+                validator: (v) => (v == null || v.trim().isEmpty) ? 'Rent amount is required' : null,
               ),
             ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        FilledButton(onPressed: _submit, child: const Text('Save')),
+      ],
+    );
+  }
+}
+
+class _PaymentDialog extends StatefulWidget {
+  final String? initialAmount;
+  const _PaymentDialog({Key? key, this.initialAmount}) : super(key: key);
+
+  @override
+  State<_PaymentDialog> createState() => _PaymentDialogState();
+}
+
+class _PaymentDialogState extends State<_PaymentDialog> {
+  final _formKey = GlobalKey<FormState>();
+  final _amountCtrl = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _amountCtrl.text = widget.initialAmount ?? '';
+  }
+
+  @override
+  void dispose() {
+    _amountCtrl.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    if (!_formKey.currentState!.validate()) return;
+    final amt = num.tryParse(_amountCtrl.text.trim());
+    if (amt == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Enter a valid amount')),
+      );
+      return;
+    }
+    Navigator.of(context).pop(amt);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Record Payment'),
+      content: Form(
+        key: _formKey,
+        child: SizedBox(
+          width: 360,
+          child: TextFormField(
+            controller: _amountCtrl,
+            decoration: const InputDecoration(labelText: 'Amount'),
+            keyboardType: TextInputType.number,
+            validator: (v) => (v == null || v.trim().isEmpty) ? 'Amount is required' : null,
           ),
         ),
       ),
