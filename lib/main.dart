@@ -11,6 +11,7 @@ import 'package:property_manager_frontend/screens/dashboard/dashboard_shell.dart
 
 // Landlord detail screen for a property’s units
 import 'package:property_manager_frontend/screens/landlord/landlord_property_units.dart';
+import 'package:property_manager_frontend/screens/landlord/landlord_overview.dart';
 
 import 'package:property_manager_frontend/theme/app_theme.dart';
 import 'package:property_manager_frontend/providers/theme_provider.dart';
@@ -70,7 +71,8 @@ class PropSmartApp extends StatelessWidget {
         '/admin_dashboard': (_) => const DashboardShell(),
         '/tenant_dashboard': (_) => const DashboardShell(),
         '/landlord_payouts': (_) => const LandlordPayoutsScreen(),
-
+        '/landlord_overview': (_) => const LandlordOverview(),
+        
         // ✅ Landlord’s property units page; accepts either an int or {propertyId: int}
         '/landlord_property_units': (context) {
           final args = ModalRoute.of(context)!.settings.arguments;
