@@ -1,6 +1,7 @@
 // lib/screens/landlord/landlord_property_units.dart
 // UPDATED: shows monthly rent status (Paid/Unpaid), tenant phone,
-// and actions for Record Payment & Send Reminder.
+// actions (Assign / End Lease / Record Payment / Send Reminder / Edit / Delete),
+// and relocates the Payout Methods button into the header card.
 
 import 'package:flutter/material.dart';
 import 'package:property_manager_frontend/services/property_service.dart';
@@ -24,6 +25,12 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
 
   // rent status cache: unit_id -> { paid: bool, lease_id: int?, amount_due, ... }
   Map<int, Map<String, dynamic>> _rentStatus = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _loadDetailed();
+  }
 
   String _currentPeriod() {
     final now = DateTime.now();
@@ -69,8 +76,9 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
       // Map by unit_id
       final Map<int, Map<String, dynamic>> m = {};
       for (final it in (rs['items'] as List<dynamic>? ?? [])) {
-        final unitId = (it['unit_id'] as num).toInt();
-        m[unitId] = Map<String, dynamic>.from(it as Map);
+        final map = Map<String, dynamic>.from(it as Map<String, dynamic>);
+        final unitId = (map['unit_id'] as num).toInt();
+        m[unitId] = map;
       }
       if (!mounted) return;
       setState(() => _rentStatus = m);
@@ -320,12 +328,6 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
   }
 
   @override
-  void initState() {
-    super.initState();
-    _loadDetailed();
-  }
-
-  @override
   Widget build(BuildContext context) {
     final t = Theme.of(context);
 
@@ -348,12 +350,6 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
         title: Text(name),
         actions: [
           IconButton(
-            tooltip: 'Payout Methods',
-            onPressed: () => Navigator.of(context).pushNamed('/landlord_payouts'),
-            icon: const Icon(Icons.account_balance_wallet_outlined),
-          ),
-
-          IconButton(
             onPressed: _loadDetailed,
             tooltip: 'Refresh',
             icon: const Icon(Icons.refresh_rounded),
@@ -364,7 +360,7 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          // header
+          // Header card with relocated Payout button
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
@@ -375,7 +371,22 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(name, style: t.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800)),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        name,
+                        style: t.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
+                      ),
+                    ),
+                    // Relocated button here:
+                    OutlinedButton.icon(
+                      onPressed: () => Navigator.of(context).pushNamed('/landlord_payouts'),
+                      icon: const Icon(Icons.account_balance_wallet_outlined),
+                      label: const Text('Payout Methods'),
+                    ),
+                  ],
+                ),
                 const SizedBox(height: 6),
                 Row(
                   children: [
@@ -456,7 +467,8 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
                     final rs = _rentStatus[unitId];
                     final paid = rs?['paid'] == true;
                     final amountDue = rs?['amount_due'];
-                    final leaseId = (rs?['lease_id'] as num?)?.toInt();
+                    // leaseId is read-only here; actions use unit['lease'] when available
+                    // final leaseId = (rs?['lease_id'] as num?)?.toInt();
 
                     return DataRow(
                       cells: [

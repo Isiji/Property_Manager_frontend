@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:property_manager_frontend/services/report_service.dart';
 import 'package:property_manager_frontend/utils/token_manager.dart';
+import 'package:property_manager_frontend/utils/download_helper.dart';
 
 class LandlordOverview extends StatefulWidget {
   const LandlordOverview({super.key});
@@ -99,6 +100,40 @@ class _LandlordOverviewState extends State<LandlordOverview> {
             onPressed: _load,
             icon: const Icon(Icons.refresh_rounded),
           ),
+          // inside AppBar actions (after Refresh)
+IconButton(
+  tooltip: 'Send reminders (dry run)',
+  onPressed: () async {
+    final session = await TokenManager.loadSession();
+    if (session == null) return;
+    final resp = await ReportService.sendReminders(
+      landlordId: session.userId,
+      year: _year,
+      month: _month,
+      dryRun: true,
+    );
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Would send to ${resp['count']} tenants')),
+    );
+  },
+  icon: const Icon(Icons.sms_rounded),
+),
+IconButton(
+  tooltip: 'Download CSV',
+  onPressed: () async {
+    final session = await TokenManager.loadSession();
+    if (session == null) return;
+    final bytes = await ReportService.downloadMonthlyCsv(
+      landlordId: session.userId,
+      year: _year,
+      month: _month,
+    );
+    await DownloadHelper.saveBytes('monthly_summary_${_year}_$_month.csv', bytes);
+  },
+  icon: const Icon(Icons.download_rounded),
+),
+
           const SizedBox(width: 8),
         ],
       ),
