@@ -13,19 +13,22 @@ class TenantService {
     String? password,
     required int propertyId,
     required int unitId,
+    String? idNumber, // NEW: optional National ID
   }) async {
     final url = Uri.parse('${AppConfig.apiBaseUrl}/tenants/');
     final headers = {
       'Content-Type': 'application/json',
       ...await TokenManager.authHeaders(),
     };
+
     final payload = <String, dynamic>{
       'name': name,
       'phone': phone,
-      'email': email,         // backend now allows null
-      'password': password,   // backend now allows null
+      'email': email,           // backend allows null
+      'password': password,     // backend allows null
       'property_id': propertyId,
       'unit_id': unitId,
+      'id_number': idNumber,    // NEW: maps to backend schema field
     }..removeWhere((k, v) => v == null);
 
     print('[TenantService] POST $url');
@@ -70,9 +73,11 @@ class TenantService {
 
     print('[TenantService] POST $url');
     print('[TenantService] payload=${jsonEncode(payload)}');
-    final res = await http.post(url,
-        headers: {'Content-Type': 'application/json', ...headers},
-        body: jsonEncode(payload));
+    final res = await http.post(
+      url,
+      headers: {'Content-Type': 'application/json', ...headers},
+      body: jsonEncode(payload),
+    );
     print('[TenantService] ← ${res.statusCode} ${res.body}');
     if (res.statusCode == 200 || res.statusCode == 201) {
       return jsonDecode(res.body) as Map<String, dynamic>;

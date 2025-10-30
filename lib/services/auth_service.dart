@@ -18,13 +18,14 @@ class AuthService {
     required String role,
     String? propertyCode,
     int? unitId,
+    String? idNumber, // NEW: optional National ID
   }) async {
     if (role != 'tenant' && (password == null || password.isEmpty)) {
       throw Exception('Password is required for $role registration.');
     }
 
     final url = Uri.parse(AppConfig.registerEndpoint);
-    final payload = {
+    final payload = <String, dynamic>{
       'name': name,
       'phone': phone,
       'email': email,
@@ -32,6 +33,7 @@ class AuthService {
       'role': role,
       'property_code': propertyCode,
       'unit_id': unitId,
+      'id_number': idNumber, // snake_case for backend
     }..removeWhere((_, v) => v == null);
 
     print('➡️ Sending to: $url');
@@ -46,7 +48,7 @@ class AuthService {
     print('⬅️ Response: ${response.statusCode} ${response.body}');
 
     if (response.statusCode == 200 || response.statusCode == 201) {
-      return jsonDecode(response.body);
+      return jsonDecode(response.body) as Map<String, dynamic>;
     } else {
       throw Exception('Failed to register: ${response.body}');
     }
@@ -79,7 +81,7 @@ class AuthService {
     print('⬅️ Response: ${response.statusCode} ${response.body}');
 
     if (response.statusCode == 200) {
-      final data = jsonDecode(response.body);
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
       final token = data['access_token'];
       final userId = data['id'] ?? 0;
 
@@ -87,21 +89,20 @@ class AuthService {
         throw Exception('Missing access token in response');
       }
 
-      // Decode JWT
+      // Decode JWT to read role (fallback to requested role)
       final decoded = JwtDecoder.decode(token);
       final roleFromToken = decoded['role'] ?? role;
 
       print('🔑 Decoded Token: $decoded');
       print('✅ Login success: role=$roleFromToken, id=$userId');
 
-      // Save session locally
+      // Persist session
       await TokenManager.saveSession(
         token: token,
         role: roleFromToken,
         userId: userId,
       );
 
-      // Return role & token to handle redirect
       return {'token': token, 'role': roleFromToken, 'userId': userId};
     } else {
       print('❌ Login failed: ${response.statusCode} ${response.body}');
@@ -118,17 +119,14 @@ class AuthService {
     final headers = await TokenManager.authHeaders();
     final response = await http.get(
       Uri.parse('${AppConfig.apiBaseUrl}/auth/profile'),
-      headers: {
-        'Content-Type': 'application/json',
-        ...headers,
-      },
+      headers: {'Content-Type': 'application/json', ...headers},
     );
 
     print('➡️ Fetching profile');
     print('⬅️ Response: ${response.statusCode} ${response.body}');
 
     if (response.statusCode == 200) {
-      return jsonDecode(response.body);
+      return jsonDecode(response.body) as Map<String, dynamic>;
     } else {
       throw Exception('Failed to load profile');
     }

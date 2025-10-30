@@ -1,7 +1,6 @@
 // lib/screens/landlord/landlord_property_units.dart
-// UPDATED: shows monthly rent status (Paid/Unpaid), tenant phone,
-// actions (Assign / End Lease / Record Payment / Send Reminder / Edit / Delete),
-// and relocates the Payout Methods button into the header card.
+// UPDATED: adds optional "National ID" input on Assign Tenant dialog
+// and forwards it to TenantService.createTenant(idNumber: ...)
 
 import 'package:flutter/material.dart';
 import 'package:property_manager_frontend/services/property_service.dart';
@@ -192,6 +191,7 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
         email: data.email?.trim().isEmpty == true ? null : data.email,
         propertyId: propertyId,
         unitId: unitId,
+        idNumber: data.idNumber, // NEW
       );
 
       final tenantId = (tenant['id'] as num?)?.toInt();
@@ -204,7 +204,7 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
         tenantId: tenantId,
         unitId: unitId,
         rentAmount: data.rentAmount,
-        startDate: today, // backend expects date-only
+        startDate: today,
         active: 1,
       );
 
@@ -282,7 +282,7 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
     if (amount == null) return;
 
     try {
-      final period = _currentPeriod();     // YYYY-MM for the month
+      final period = _currentPeriod();     // YYYY-MM
       final paidDate = _todayDate();       // YYYY-MM-DD
       await PaymentService.recordPayment(
         leaseId: leaseId,
@@ -379,7 +379,6 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
                         style: t.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
                       ),
                     ),
-                    // Relocated button here:
                     OutlinedButton.icon(
                       onPressed: () => Navigator.of(context).pushNamed('/landlord_payouts'),
                       icon: const Icon(Icons.account_balance_wallet_outlined),
@@ -467,8 +466,6 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
                     final rs = _rentStatus[unitId];
                     final paid = rs?['paid'] == true;
                     final amountDue = rs?['amount_due'];
-                    // leaseId is read-only here; actions use unit['lease'] when available
-                    // final leaseId = (rs?['lease_id'] as num?)?.toInt();
 
                     return DataRow(
                       cells: [
@@ -742,12 +739,6 @@ class _PaymentDialogState extends State<_PaymentDialog> {
   }
 }
 
-class _UnitData {
-  final String number;
-  final double rentAmount;
-  _UnitData({required this.number, required this.rentAmount});
-}
-
 class _AssignTenantDialog extends StatefulWidget {
   final String unitLabel;
   final String? initialRent;
@@ -762,6 +753,7 @@ class _AssignTenantDialogState extends State<_AssignTenantDialog> {
   final _nameCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
   final _emailCtrl = TextEditingController();
+  final _idCtrl = TextEditingController();       // NEW
   final _passwordCtrl = TextEditingController();
   final _rentCtrl = TextEditingController();
 
@@ -776,6 +768,7 @@ class _AssignTenantDialogState extends State<_AssignTenantDialog> {
     _nameCtrl.dispose();
     _phoneCtrl.dispose();
     _emailCtrl.dispose();
+    _idCtrl.dispose();         // NEW
     _passwordCtrl.dispose();
     _rentCtrl.dispose();
     super.dispose();
@@ -797,6 +790,7 @@ class _AssignTenantDialogState extends State<_AssignTenantDialog> {
         email: _emailCtrl.text.trim().isEmpty ? null : _emailCtrl.text.trim(),
         password: _passwordCtrl.text.trim().isEmpty ? null : _passwordCtrl.text.trim(),
         rentAmount: rent,
+        idNumber: _idCtrl.text.trim().isEmpty ? null : _idCtrl.text.trim(), // NEW
       ),
     );
   }
@@ -830,6 +824,11 @@ class _AssignTenantDialogState extends State<_AssignTenantDialog> {
               ),
               const SizedBox(height: 10),
               TextFormField(
+                controller: _idCtrl,
+                decoration: const InputDecoration(labelText: 'National ID (optional)'),
+              ),
+              const SizedBox(height: 10),
+              TextFormField(
                 controller: _passwordCtrl,
                 decoration: const InputDecoration(labelText: 'Password (optional)'),
                 obscureText: true,
@@ -859,11 +858,19 @@ class _AssignTenantData {
   final String? email;
   final String? password;
   final num rentAmount;
+  final String? idNumber; // NEW
   _AssignTenantData({
     required this.name,
     required this.phone,
     this.email,
     this.password,
     required this.rentAmount,
+    this.idNumber,
   });
+}
+
+class _UnitData {
+  final String number;
+  final double rentAmount;
+  _UnitData({required this.number, required this.rentAmount});
 }
