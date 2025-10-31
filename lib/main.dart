@@ -5,7 +5,7 @@ import 'package:provider/provider.dart';
 import 'package:property_manager_frontend/screens/auth/login_screen.dart';
 import 'package:property_manager_frontend/screens/auth/register_screen.dart';
 import 'package:property_manager_frontend/screens/settings/settings_screen.dart';
-
+import 'package:property_manager_frontend/screens/tenant/tenant_home.dart';
 // Shell that hosts role-specific content (topbar + collapsible side nav)
 import 'package:property_manager_frontend/screens/dashboard/dashboard_shell.dart';
 
@@ -61,7 +61,7 @@ class PropSmartApp extends StatelessWidget {
         '/login': (_) => const LoginScreen(),
         '/register': (_) => const RegisterScreen(),
         '/settings': (_) => const SettingsScreen(),
-
+        '/tenant_home': (_) => const TenantHome(),
         // ✅ One common dashboard shell
         '/dashboard': (_) => const DashboardShell(),
 
@@ -72,7 +72,6 @@ class PropSmartApp extends StatelessWidget {
         '/tenant_dashboard': (_) => const DashboardShell(),
         '/landlord_payouts': (_) => const LandlordPayoutsScreen(),
         '/landlord_overview': (_) => const LandlordOverview(),
-        
         // ✅ Landlord’s property units page; accepts either an int or {propertyId: int}
         '/landlord_property_units': (context) {
           final args = ModalRoute.of(context)!.settings.arguments;

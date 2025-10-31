@@ -18,8 +18,18 @@ class _LoginScreenState extends State<LoginScreen> {
 
   final List<String> roles = ['admin', 'landlord', 'manager', 'tenant'];
 
+  @override
+  void dispose() {
+    phoneController.dispose();
+    passwordController.dispose();
+    super.dispose();
+  }
+
   Future<void> _handleLogin() async {
-    if (phoneController.text.isEmpty) {
+    final phone = phoneController.text.trim();
+    final pwd = passwordController.text.trim();
+
+    if (phone.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Phone number is required')),
       );
@@ -30,14 +40,16 @@ class _LoginScreenState extends State<LoginScreen> {
 
     try {
       final result = await AuthService.loginUser(
-        phone: phoneController.text,
-        password: passwordController.text,
+        phone: phone,
+        password: selectedRole == 'tenant' ? null : pwd, // tenant can be passwordless
         role: selectedRole,
       );
 
-      final role = result['role'];
+      final role = (result['role'] ?? selectedRole).toString();
       final userId = result['userId'];
       print('🎯 Redirecting for role=$role (User ID=$userId)');
+
+      if (!mounted) return;
 
       switch (role) {
         case 'landlord':
@@ -47,7 +59,8 @@ class _LoginScreenState extends State<LoginScreen> {
           Navigator.pushReplacementNamed(context, '/manager_dashboard');
           break;
         case 'tenant':
-          Navigator.pushReplacementNamed(context, '/tenant_dashboard');
+          // NEW: send tenants to the new tenant portal
+          Navigator.pushReplacementNamed(context, '/tenant_home');
           break;
         case 'admin':
           Navigator.pushReplacementNamed(context, '/admin_dashboard');
@@ -59,11 +72,12 @@ class _LoginScreenState extends State<LoginScreen> {
       }
     } catch (e) {
       print('❌ Login failed: $e');
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Login failed: $e')),
       );
     } finally {
-      setState(() => isLoading = false);
+      if (mounted) setState(() => isLoading = false);
     }
   }
 
@@ -76,8 +90,7 @@ class _LoginScreenState extends State<LoginScreen> {
           padding: const EdgeInsets.all(24.0),
           child: Card(
             elevation: 4,
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
             child: Padding(
               padding: const EdgeInsets.all(24.0),
               child: Column(
@@ -91,6 +104,8 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                   ),
                   const SizedBox(height: 24),
+
+                  // Role selector
                   DropdownButtonFormField<String>(
                     value: selectedRole,
                     items: roles
@@ -105,11 +120,12 @@ class _LoginScreenState extends State<LoginScreen> {
                       labelText: 'Role',
                       border: OutlineInputBorder(),
                     ),
-                    onChanged: (v) {
-                      setState(() => selectedRole = v ?? 'landlord');
-                    },
+                    onChanged: (v) => setState(() => selectedRole = v ?? 'landlord'),
                   ),
+
                   const SizedBox(height: 16),
+
+                  // Phone
                   TextField(
                     controller: phoneController,
                     decoration: const InputDecoration(
@@ -118,7 +134,10 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                     keyboardType: TextInputType.phone,
                   ),
+
                   const SizedBox(height: 16),
+
+                  // Password (hidden for tenant)
                   if (selectedRole != 'tenant')
                     TextField(
                       controller: passwordController,
@@ -128,22 +147,25 @@ class _LoginScreenState extends State<LoginScreen> {
                         border: OutlineInputBorder(),
                       ),
                     ),
+
                   const SizedBox(height: 24),
+
+                  // Login button
                   ElevatedButton(
                     onPressed: isLoading ? null : _handleLogin,
                     style: ElevatedButton.styleFrom(
                       minimumSize: const Size(double.infinity, 50),
                     ),
                     child: isLoading
-                        ? const CircularProgressIndicator(
-                            color: Colors.white,
-                          )
+                        ? const CircularProgressIndicator(color: Colors.white)
                         : const Text('Login'),
                   ),
+
                   const SizedBox(height: 12),
+
+                  // Register link
                   TextButton(
-                    onPressed: () =>
-                        Navigator.pushReplacementNamed(context, '/register'),
+                    onPressed: () => Navigator.pushReplacementNamed(context, '/register'),
                     child: const Text("Don't have an account? Register here"),
                   ),
                 ],

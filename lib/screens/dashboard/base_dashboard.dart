@@ -2,6 +2,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:lucide_icons/lucide_icons.dart';
+import 'package:property_manager_frontend/utils/token_manager.dart';
 
 class BaseDashboard extends StatefulWidget {
   final String title;
@@ -22,6 +23,35 @@ class BaseDashboard extends StatefulWidget {
 class _BaseDashboardState extends State<BaseDashboard> {
   bool _collapsed = false;
 
+  Future<void> _logout(BuildContext context) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Log out'),
+        content: const Text('Are you sure you want to log out?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Log out'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+
+    try {
+      await TokenManager.clearSession();
+      if (!mounted) return;
+      Navigator.of(context).pushNamedAndRemoveUntil('/login', (_) => false);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to log out: $e')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -36,6 +66,13 @@ class _BaseDashboardState extends State<BaseDashboard> {
             icon: Icon(_collapsed ? LucideIcons.panelRightOpen : LucideIcons.panelLeftClose),
             onPressed: () => setState(() => _collapsed = !_collapsed),
           ),
+          const SizedBox(width: 4),
+          IconButton(
+            tooltip: 'Log out',
+            icon: const Icon(LucideIcons.logOut),
+            onPressed: () => _logout(context),
+          ),
+          const SizedBox(width: 8),
         ],
       ),
       body: Row(
@@ -74,18 +111,12 @@ class _SideNav extends StatelessWidget {
       _NavItem(
         icon: LucideIcons.layoutDashboard,
         label: 'Overview',
-        onTap: () {
-          // stays on dashboard
-          Navigator.pushReplacementNamed(context, '/dashboard');
-        },
+        onTap: () => Navigator.pushReplacementNamed(context, '/dashboard'),
       ),
       _NavItem(
         icon: LucideIcons.building2,
         label: 'Properties',
-        onTap: () {
-          // landlord overview already shows properties; keep route here for future sections
-          Navigator.pushReplacementNamed(context, '/dashboard');
-        },
+        onTap: () => Navigator.pushReplacementNamed(context, '/dashboard'),
       ),
       _NavItem(
         icon: LucideIcons.settings,

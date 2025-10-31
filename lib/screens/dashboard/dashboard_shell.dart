@@ -30,14 +30,14 @@ class _DashboardShellState extends State<DashboardShell> {
 
   @override
   Widget build(BuildContext context) {
-    // You can add tenant/manager/admin content later and switch here.
+    // Switch content based on role. BaseDashboard now provides the Logout button on AppBar.
     Widget content;
     String title;
 
     switch (_role) {
       case 'landlord':
         title = 'Landlord';
-        content = const LandlordHome(); // content-only widget
+        content = const LandlordHome();
         break;
       case 'manager':
         title = 'Manager';

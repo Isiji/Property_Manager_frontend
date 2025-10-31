@@ -1,3 +1,6 @@
+// lib/screens/auth/register_screen.dart
+// ignore_for_file: avoid_print, use_build_context_synchronously
+
 import 'package:flutter/material.dart';
 import 'package:property_manager_frontend/services/auth_service.dart';
 
@@ -13,9 +16,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
   final _nameController = TextEditingController();
   final _phoneController = TextEditingController();
-  final _emailController = TextEditingController(); // optional
-  final _idController = TextEditingController();    // optional National ID
-  final _passwordController = TextEditingController();
+  final _emailController = TextEditingController();     // optional
+  final _idController = TextEditingController();        // optional National ID
+  final _passwordController = TextEditingController();  // required for non-tenant
 
   final _propertyCodeController = TextEditingController(); // tenant-only
   final _unitIdController = TextEditingController();       // tenant-only
@@ -46,38 +49,51 @@ class _RegisterScreenState extends State<RegisterScreen> {
       final email = _emailController.text.trim().isEmpty ? null : _emailController.text.trim();
       final idNumber = _idController.text.trim().isEmpty ? null : _idController.text.trim();
 
+      // 1) Register
       await AuthService.registerUser(
         name: _nameController.text.trim(),
         phone: _phoneController.text.trim(),
         email: email,
-        idNumber: idNumber, // mapped to id_number in AuthService
-        password: _passwordController.text.trim(),
+        idNumber: idNumber, // maps to id_number
+        password: _selectedRole == 'tenant' ? _passwordController.text.trim().isEmpty ? null : _passwordController.text.trim()
+                                            : _passwordController.text.trim(), // non-tenant must have password
         role: _selectedRole,
-        propertyCode: _selectedRole == 'tenant'
-            ? _propertyCodeController.text.trim()
-            : null,
-        unitId: _selectedRole == 'tenant'
-            ? int.tryParse(_unitIdController.text.trim())
-            : null,
+        propertyCode: _selectedRole == 'tenant' ? _propertyCodeController.text.trim() : null,
+        unitId: _selectedRole == 'tenant' ? int.tryParse(_unitIdController.text.trim()) : null,
+      );
+
+      // 2) Auto-login (tenant can be passwordless)
+      final login = await AuthService.loginUser(
+        phone: _phoneController.text.trim(),
+        password: _selectedRole == 'tenant'
+            ? (_passwordController.text.trim().isEmpty ? null : _passwordController.text.trim())
+            : _passwordController.text.trim(),
+        role: _selectedRole,
       );
 
       if (!mounted) return;
 
-      // Success UX
+      // 3) Route by role
+      final role = (login['role'] ?? _selectedRole).toString();
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Registration successful! Please log in.')),
+        const SnackBar(content: Text('Registration complete!')),
       );
 
-      // 🔁 Redirect logic:
-      // Landlord: hard redirect to /login and clear back stack
-      // Others: simply pop back (assuming they came from /login)
-      if (_selectedRole == 'landlord') {
-        await Future.delayed(const Duration(milliseconds: 600));
-        if (!mounted) return;
-        Navigator.of(context).pushNamedAndRemoveUntil('/login', (route) => false);
-      } else {
-        // Go back to previous screen (often the login)
-        Navigator.pop(context);
+      switch (role) {
+        case 'tenant':
+          Navigator.of(context).pushReplacementNamed('/tenant_home'); // ✅ direct to tenant portal
+          break;
+        case 'landlord':
+          Navigator.of(context).pushReplacementNamed('/dashboard');
+          break;
+        case 'manager':
+          Navigator.of(context).pushReplacementNamed('/manager_dashboard');
+          break;
+        case 'admin':
+          Navigator.of(context).pushReplacementNamed('/admin_dashboard');
+          break;
+        default:
+          Navigator.of(context).pushReplacementNamed('/login');
       }
     } catch (e) {
       if (!mounted) return;
@@ -106,9 +122,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
             padding: const EdgeInsets.all(24),
             child: Card(
               elevation: 8,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16),
-              ),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
               child: Padding(
                 padding: const EdgeInsets.all(20),
                 child: Form(
@@ -126,22 +140,39 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       ),
                       const SizedBox(height: 20),
 
-                      // Required fields
+                      // Required
                       _requiredField(_nameController, "Full Name", Icons.person),
                       const SizedBox(height: 10),
                       _requiredField(_phoneController, "Phone Number", Icons.phone),
 
                       const SizedBox(height: 10),
 
-                      // Optional email + National ID
+                      // Optional
                       _optionalField(_emailController, "Email (optional)", Icons.email),
                       const SizedBox(height: 10),
                       _optionalField(_idController, "National ID (optional)", Icons.badge),
 
                       const SizedBox(height: 10),
 
-                      // Required password (unless tenant with OTP flows—in your case required for non-tenant)
-                      _requiredField(_passwordController, "Password", Icons.lock, isPassword: true),
+                      // Password (required for non-tenant; optional for tenant)
+                      TextFormField(
+                        controller: _passwordController,
+                        obscureText: true,
+                        decoration: const InputDecoration(
+                          labelText: 'Password',
+                          prefixIcon: Icon(Icons.lock),
+                          border: OutlineInputBorder(),
+                        ),
+                        validator: (v) {
+                          if (_selectedRole == 'tenant') {
+                            return null; // optional
+                          }
+                          if (v == null || v.trim().isEmpty) {
+                            return 'Password is required for $_selectedRole';
+                          }
+                          return null;
+                        },
+                      ),
 
                       const SizedBox(height: 10),
 
@@ -184,9 +215,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                           style: ElevatedButton.styleFrom(
                             backgroundColor: Colors.deepPurple,
                             padding: const EdgeInsets.symmetric(vertical: 14),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                           ),
                           onPressed: _loading ? null : _register,
                           child: _loading
@@ -196,7 +225,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       ),
                       const SizedBox(height: 16),
                       TextButton(
-                        onPressed: _loading ? null : () => Navigator.pop(context),
+                        onPressed: () => Navigator.pop(context),
                         child: const Text("Already have an account? Login"),
                       ),
                     ],
@@ -210,17 +239,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
     );
   }
 
-  // ---------- Field Builders ----------
+  // ---------- Field helpers ----------
 
-  Widget _requiredField(
-    TextEditingController c,
-    String label,
-    IconData icon, {
-    bool isPassword = false,
-  }) {
+  Widget _requiredField(TextEditingController c, String label, IconData icon) {
     return TextFormField(
       controller: c,
-      obscureText: isPassword,
       validator: (v) => (v == null || v.trim().isEmpty) ? "$label cannot be empty" : null,
       decoration: InputDecoration(
         labelText: label,
