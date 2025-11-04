@@ -1,3 +1,7 @@
+// lib/screens/tenant/tenant_list_screen.dart
+// Uses TenantService.fetchTenants() which returns List<TenantDto>.
+// Safe nulls + simple actions (call/copy).
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:property_manager_frontend/services/tenant_service.dart';
@@ -12,7 +16,7 @@ class TenantListScreen extends StatefulWidget {
 
 class _TenantListScreenState extends State<TenantListScreen> {
   final _searchCtrl = TextEditingController();
-  Future<List<TenantDto>>? _futureTenants; // <-- TenantDto here
+  Future<List<TenantDto>>? _futureTenants;
   bool _loading = false;
 
   @override
@@ -23,7 +27,7 @@ class _TenantListScreenState extends State<TenantListScreen> {
 
   void _load({String? q}) {
     setState(() {
-      _futureTenants = TenantService.fetchTenants(query: q); // returns List<TenantDto>
+      _futureTenants = TenantService.fetchTenants(query: q);
     });
   }
 
@@ -217,7 +221,7 @@ class _TenantListScreenState extends State<TenantListScreen> {
             ),
           ),
           Expanded(
-            child: FutureBuilder<List<TenantDto>>( // <-- TenantDto here
+            child: FutureBuilder<List<TenantDto>>(
               future: _futureTenants,
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting || _loading) {

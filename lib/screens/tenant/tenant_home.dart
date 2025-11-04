@@ -1,12 +1,13 @@
 // lib/screens/tenant/tenant_home.dart
 // Tenant portal with tabs: Dashboard, Payments, Maintenance, Profile.
-// Safe casting throughout so empty/404 responses don't crash the UI.
+// Defensive casting to avoid crashes if backend returns partial/empty data.
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:property_manager_frontend/services/tenant_portal_service.dart';
 import 'package:property_manager_frontend/services/tenant_service.dart';
 import 'package:property_manager_frontend/utils/token_manager.dart';
+import 'package:property_manager_frontend/services/auth_service.dart';
 
 class TenantHome extends StatefulWidget {
   const TenantHome({super.key});
@@ -45,9 +46,16 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
     super.dispose();
   }
 
+  Future<void> _logout() async {
+    await AuthService.logout();
+    if (!mounted) return;
+    Navigator.of(context).pushNamedAndRemoveUntil('/login', (_) => false);
+  }
+
   Future<void> _loadAll() async {
     try {
       setState(() => _loading = true);
+
       final role = await TokenManager.currentRole();
       if (role != 'tenant') {
         if (!mounted) return;
@@ -58,9 +66,8 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
         return;
       }
 
-      // Each call isolated so one failure doesn't nuke all tabs
       try {
-        final dash = await TenantPortalService.getOverview();   // may be {}
+        final dash = await TenantPortalService.getOverview();
         _dashboard = dash is Map ? dash.cast<String, dynamic>() : <String, dynamic>{};
       } catch (e) {
         _dashboard = const <String, dynamic>{};
@@ -93,7 +100,7 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
         _emailCtrl.text = (p['email'] ?? '').toString();
         _idCtrl.text = (p['id_number'] ?? '').toString();
       } catch (_) {
-        // leave profile fields as-is
+        // leave fields
       }
 
       if (mounted) setState(() {});
@@ -209,6 +216,7 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
         ),
         actions: [
           IconButton(onPressed: _loadAll, icon: const Icon(Icons.refresh_rounded), tooltip: 'Refresh'),
+          IconButton(onPressed: _logout, icon: const Icon(Icons.logout_rounded), tooltip: 'Logout'),
           const SizedBox(width: 8),
         ],
       ),
@@ -226,7 +234,7 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
     );
   }
 
-  // ---------- helpers for safe casting ----------
+  // ---------- helpers ----------
   Map<String, dynamic> _asMap(dynamic v) =>
       v is Map ? v.cast<String, dynamic>() : <String, dynamic>{};
 
@@ -250,7 +258,6 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        // Unit card
         Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
@@ -293,7 +300,6 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
 
         const SizedBox(height: 16),
 
-        // KPIs
         Wrap(
           spacing: 12,
           runSpacing: 12,
@@ -309,7 +315,6 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
 
         const SizedBox(height: 16),
 
-        // Quick actions
         Row(
           children: [
             FilledButton.icon(
@@ -385,7 +390,7 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
           title: Text('Ksh $amount • $period', maxLines: 1, overflow: TextOverflow.ellipsis),
           subtitle: Text(date.isEmpty ? '—' : date),
           trailing: Text(ref.isEmpty ? '' : ref, style: t.textTheme.labelSmall),
-          onTap: () {/* receipt view later */},
+          onTap: () {/* future: open receipt */},
         );
       },
     );
@@ -431,13 +436,17 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
                 final chip = Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                   decoration: BoxDecoration(
-                    color: status == 'closed' ? t.colorScheme.tertiaryContainer : t.colorScheme.primaryContainer,
+                    color: status == 'closed'
+                        ? t.colorScheme.tertiaryContainer
+                        : t.colorScheme.primaryContainer,
                     borderRadius: BorderRadius.circular(999),
                   ),
                   child: Text(
                     status.toUpperCase(),
                     style: t.textTheme.labelSmall?.copyWith(
-                      color: status == 'closed' ? t.colorScheme.onTertiaryContainer : t.colorScheme.onPrimaryContainer,
+                      color: status == 'closed'
+                          ? t.colorScheme.onTertiaryContainer
+                          : t.colorScheme.onPrimaryContainer,
                       fontWeight: FontWeight.w800,
                     ),
                   ),

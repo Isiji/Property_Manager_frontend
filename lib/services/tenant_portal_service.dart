@@ -1,5 +1,6 @@
 // lib/services/tenant_portal_service.dart
-// Gracefully handles 404 on overview/profile so UI still renders.
+// Graceful 404 handling so the tenant UI can still render
+// even when a backend feature isn’t deployed yet.
 
 import 'dart:convert';
 import 'package:http/http.dart' as http;
@@ -18,10 +19,7 @@ class TenantPortalService {
       final body = jsonDecode(r.body);
       return body is Map ? body.cast<String, dynamic>() : <String, dynamic>{};
     }
-    if (r.statusCode == 404) {
-      // Backend route not ready yet; show empty dashboard instead of crashing
-      return <String, dynamic>{};
-    }
+    if (r.statusCode == 404) return <String, dynamic>{};
     throw Exception('Overview failed: ${r.statusCode} ${r.body}');
   }
 
@@ -55,7 +53,11 @@ class TenantPortalService {
   }) async {
     final h = await TokenManager.authHeaders();
     final url = Uri.parse('${AppConfig.apiBaseUrl}/tenants/me/maintenance');
-    final body = {'title': title, 'description': description}..removeWhere((k, v) => v == null);
+    final body = {
+      'title': title,
+      'description': description,
+    }..removeWhere((k, v) => v == null);
+
     final r = await http.post(url, headers: _json(h), body: jsonEncode(body));
     if (r.statusCode == 200 || r.statusCode == 201) {
       final res = jsonDecode(r.body);
