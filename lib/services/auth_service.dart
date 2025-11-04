@@ -17,8 +17,9 @@ class AuthService {
     String? password,
     required String role,
     String? propertyCode,
-    int? unitId,
-    String? idNumber, // NEW: optional National ID
+    int? unitId,            // legacy (kept for compatibility)
+    String? unitNumber,     // NEW (preferred)
+    String? idNumber,       // optional National ID
   }) async {
     if (role != 'tenant' && (password == null || password.isEmpty)) {
       throw Exception('Password is required for $role registration.');
@@ -32,8 +33,10 @@ class AuthService {
       'password': password,
       'role': role,
       'property_code': propertyCode,
-      'unit_id': unitId,
-      'id_number': idNumber, // snake_case for backend
+      // prefer number; send id only when number is absent
+      'unit_number': unitNumber,
+      'unit_id': unitNumber == null ? unitId : null,
+      'id_number': idNumber,
     }..removeWhere((_, v) => v == null);
 
     print('➡️ Sending to: $url');

@@ -21,7 +21,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _passwordController = TextEditingController();  // required for non-tenant
 
   final _propertyCodeController = TextEditingController(); // tenant-only
-  final _unitIdController = TextEditingController();       // tenant-only
+  final _unitNumberController  = TextEditingController();  // NEW: tenant-only (string label like "A3")
 
   String _selectedRole = 'tenant';
   bool _loading = false;
@@ -36,7 +36,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     _idController.dispose();
     _passwordController.dispose();
     _propertyCodeController.dispose();
-    _unitIdController.dispose();
+    _unitNumberController.dispose();
     super.dispose();
   }
 
@@ -49,17 +49,18 @@ class _RegisterScreenState extends State<RegisterScreen> {
       final email = _emailController.text.trim().isEmpty ? null : _emailController.text.trim();
       final idNumber = _idController.text.trim().isEmpty ? null : _idController.text.trim();
 
-      // 1) Register
+      // 1) Register (tenant prefers unitNumber)
       await AuthService.registerUser(
         name: _nameController.text.trim(),
         phone: _phoneController.text.trim(),
         email: email,
         idNumber: idNumber, // maps to id_number
-        password: _selectedRole == 'tenant' ? _passwordController.text.trim().isEmpty ? null : _passwordController.text.trim()
-                                            : _passwordController.text.trim(), // non-tenant must have password
+        password: _selectedRole == 'tenant'
+            ? (_passwordController.text.trim().isEmpty ? null : _passwordController.text.trim())
+            : _passwordController.text.trim(), // non-tenant must have password
         role: _selectedRole,
         propertyCode: _selectedRole == 'tenant' ? _propertyCodeController.text.trim() : null,
-        unitId: _selectedRole == 'tenant' ? int.tryParse(_unitIdController.text.trim()) : null,
+        unitNumber: _selectedRole == 'tenant' ? _unitNumberController.text.trim() : null,
       );
 
       // 2) Auto-login (tenant can be passwordless)
@@ -81,7 +82,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
       switch (role) {
         case 'tenant':
-          Navigator.of(context).pushReplacementNamed('/tenant_home'); // ✅ direct to tenant portal
+          // ✅ direct to tenant portal
+          Navigator.of(context).pushReplacementNamed('/tenant_home');
           break;
         case 'landlord':
           Navigator.of(context).pushReplacementNamed('/dashboard');
@@ -190,7 +192,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                             _selectedRole = val ?? 'tenant';
                             if (_selectedRole != 'tenant') {
                               _propertyCodeController.clear();
-                              _unitIdController.clear();
+                              _unitNumberController.clear();
                             }
                           });
                         },
@@ -205,7 +207,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         const SizedBox(height: 10),
                         _requiredField(_propertyCodeController, "Property Code", Icons.home_work_outlined),
                         const SizedBox(height: 10),
-                        _requiredNumericField(_unitIdController, "Unit ID (number)", Icons.apartment),
+                        _requiredField(_unitNumberController, "Unit Number/Name (e.g., A3)", Icons.apartment),
                       ],
 
                       const SizedBox(height: 25),
@@ -225,7 +227,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       ),
                       const SizedBox(height: 16),
                       TextButton(
-                        onPressed: () => Navigator.pop(context),
+                        onPressed: () {
+                          Navigator.of(context).pushReplacementNamed('/login');
+                        },
                         child: const Text("Already have an account? Login"),
                       ),
                     ],
@@ -245,24 +249,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
     return TextFormField(
       controller: c,
       validator: (v) => (v == null || v.trim().isEmpty) ? "$label cannot be empty" : null,
-      decoration: InputDecoration(
-        labelText: label,
-        prefixIcon: Icon(icon),
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-      ),
-    );
-  }
-
-  Widget _requiredNumericField(TextEditingController c, String label, IconData icon) {
-    return TextFormField(
-      controller: c,
-      keyboardType: TextInputType.number,
-      validator: (v) {
-        if (v == null || v.trim().isEmpty) return "$label cannot be empty";
-        final n = int.tryParse(v.trim());
-        if (n == null) return "Enter a valid number";
-        return null;
-      },
       decoration: InputDecoration(
         labelText: label,
         prefixIcon: Icon(icon),
