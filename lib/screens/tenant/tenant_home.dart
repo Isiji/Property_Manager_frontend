@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:property_manager_frontend/services/tenant_portal_service.dart';
 import 'package:property_manager_frontend/services/tenant_service.dart';
+import 'package:property_manager_frontend/services/payment_service.dart';
 import 'package:property_manager_frontend/utils/token_manager.dart';
 import 'package:property_manager_frontend/services/auth_service.dart';
 
@@ -317,25 +318,45 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
 
         Row(
           children: [
-            FilledButton.icon(
-              onPressed: () async {
-                try {
-                  final r = await TenantPortalService.payThisMonth();
+          FilledButton.icon(
+            onPressed: () async {
+              try {
+                final d = _asMap(_dashboard);
+                final lease = _asMap(d['lease']);
+                final status = _asMap(d['this_month']);
+                final leaseId = (lease['id'] as num?)?.toInt();
+                final expected = (status['expected'] as num?) ?? 0;
+
+                if (leaseId == null || expected <= 0) {
                   if (!mounted) return;
                   ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text(r['message'] ?? 'Payment flow started')),
+                    const SnackBar(content: Text('No active lease or invalid amount')),
                   );
-                  await _loadAll();
-                } catch (e) {
-                  if (!mounted) return;
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Payment failed: $e')),
-                  );
+                  return;
                 }
-              },
-              icon: const Icon(Icons.credit_card_rounded),
-              label: const Text('Pay Now'),
-            ),
+
+                final res = await PaymentService.initiateMpesa(
+                  leaseId: leaseId,
+                  amount: expected,
+                );
+
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('STK sent. Ref: ${res['checkout_id'] ?? '—'}')),
+                );
+
+                // Optional: refresh after a short delay or a poll loop to reflect callback
+                await _loadAll();
+              } catch (e) {
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Payment start failed: $e')),
+                );
+              }
+            },
+            icon: const Icon(Icons.credit_card_rounded),
+            label: const Text('Pay Now'),
+          ),
             const SizedBox(width: 8),
             OutlinedButton.icon(
               onPressed: _submitMaintenance,

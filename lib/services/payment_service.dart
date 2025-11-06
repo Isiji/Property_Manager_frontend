@@ -1,62 +1,93 @@
-// lib/services/payment_service.dart
-// Fetch monthly rent status & record payments / reminders.
-
+// ignore_for_file: avoid_print
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:property_manager_frontend/core/config.dart';
 import 'package:property_manager_frontend/utils/token_manager.dart';
 
 class PaymentService {
+  static Map<String, String> _json(Map<String, String> h) => {
+        'Content-Type': 'application/json',
+        ...h,
+      };
+
+  /// GET /reports/property/{propertyId}/status?period=YYYY-MM
   static Future<Map<String, dynamic>> getStatusByProperty({
     required int propertyId,
-    required String period, // YYYY-MM
+    required String period,
   }) async {
-    final headers = {
-      'Content-Type': 'application/json',
-      ...await TokenManager.authHeaders(),
-    };
-    final url = Uri.parse(
-        '${AppConfig.apiBaseUrl}/payments/status/by-property?property_id=$propertyId&period=$period');
-
-    final res = await http.get(url, headers: headers);
-    if (res.statusCode == 200) {
-      return jsonDecode(res.body) as Map<String, dynamic>;
+    final h = await TokenManager.authHeaders();
+    final url = Uri.parse('${AppConfig.apiBaseUrl}/reports/property/$propertyId/status')
+        .replace(queryParameters: {'period': period});
+    print('[PaymentService] GET $url');
+    final r = await http.get(url, headers: _json(h));
+    print('[PaymentService] ← ${r.statusCode}');
+    if (r.statusCode == 200) {
+      final b = jsonDecode(r.body);
+      return (b is Map) ? b.cast<String, dynamic>() : <String, dynamic>{};
     }
-    throw Exception('Failed to load rent status: ${res.statusCode}\n${res.body}');
+    throw Exception('Status failed: ${r.statusCode} ${r.body}');
   }
 
-  static Future<void> recordPayment({
+  /// POST /payments/record (manual cash entry)
+  static Future<Map<String, dynamic>> recordPayment({
     required int leaseId,
     required String period, // YYYY-MM
     required num amount,
     required String paidDate, // YYYY-MM-DD
   }) async {
-    final headers = {
-      'Content-Type': 'application/json',
-      ...await TokenManager.authHeaders(),
-    };
+    final h = await TokenManager.authHeaders();
     final url = Uri.parse('${AppConfig.apiBaseUrl}/payments/record');
-    final payload = {
+    final body = {
       'lease_id': leaseId,
       'period': period,
       'amount': amount,
       'paid_date': paidDate,
     };
-    final res = await http.post(url, headers: headers, body: jsonEncode(payload));
-    if (res.statusCode != 200 && res.statusCode != 201) {
-      throw Exception('Failed to record payment: ${res.statusCode}\n${res.body}');
+    print('[PaymentService] POST $url body=$body');
+    final r = await http.post(url, headers: _json(h), body: jsonEncode(body));
+    print('[PaymentService] ← ${r.statusCode} ${r.body}');
+    if (r.statusCode == 200 || r.statusCode == 201) {
+      final b = jsonDecode(r.body);
+      return (b is Map) ? b.cast<String, dynamic>() : <String, dynamic>{};
     }
+    throw Exception('Record payment failed: ${r.statusCode} ${r.body}');
   }
 
-  static Future<void> sendReminder({required int leaseId}) async {
-    final headers = {
-      'Content-Type': 'application/json',
-      ...await TokenManager.authHeaders(),
-    };
-    final url = Uri.parse('${AppConfig.apiBaseUrl}/payments/remind/$leaseId');
-    final res = await http.post(url, headers: headers);
-    if (res.statusCode != 200) {
-      throw Exception('Failed to send reminder: ${res.statusCode}\n${res.body}');
+  /// POST /payments/remind
+  static Future<Map<String, dynamic>> sendReminder({required int leaseId}) async {
+    final h = await TokenManager.authHeaders();
+    final url = Uri.parse('${AppConfig.apiBaseUrl}/payments/remind');
+    final body = {'lease_id': leaseId};
+    print('[PaymentService] POST $url body=$body');
+    final r = await http.post(url, headers: _json(h), body: jsonEncode(body));
+    print('[PaymentService] ← ${r.statusCode} ${r.body}');
+    if (r.statusCode == 200) {
+      final b = jsonDecode(r.body);
+      return (b is Map) ? b.cast<String, dynamic>() : <String, dynamic>{};
     }
+    throw Exception('Reminder failed: ${r.statusCode} ${r.body}');
+  }
+
+  /// POST /payments/mpesa/initiate
+  static Future<Map<String, dynamic>> initiateMpesa({
+    required int leaseId,
+    required num amount,
+    String? phone,
+  }) async {
+    final h = await TokenManager.authHeaders();
+    final url = Uri.parse('${AppConfig.apiBaseUrl}/payments/mpesa/initiate');
+    final body = {
+      'lease_id': leaseId,
+      'amount': amount,
+      if (phone != null && phone.isNotEmpty) 'phone': phone,
+    };
+    print('[PaymentService] POST $url body=$body');
+    final r = await http.post(url, headers: _json(h), body: jsonEncode(body));
+    print('[PaymentService] ← ${r.statusCode} ${r.body}');
+    if (r.statusCode == 200) {
+      final b = jsonDecode(r.body);
+      return (b is Map) ? b.cast<String, dynamic>() : <String, dynamic>{};
+    }
+    throw Exception('MPesa initiation failed: ${r.statusCode} ${r.body}');
   }
 }
