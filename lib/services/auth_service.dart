@@ -1,5 +1,4 @@
 // ignore_for_file: avoid_print
-
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:jwt_decoder/jwt_decoder.dart';
@@ -7,6 +6,12 @@ import 'package:property_manager_frontend/core/config.dart';
 import 'package:property_manager_frontend/utils/token_manager.dart';
 
 class AuthService {
+  Map<String, String> _baseHeadersUnauthed() => const {
+        'Content-Type': 'application/json',
+        // 👇 needed to bypass ngrok warning for unauthenticated endpoints too
+        'ngrok-skip-browser-warning': 'true',
+      };
+
   /// =============================
   /// 🔹 REGISTER USER
   /// =============================
@@ -44,14 +49,18 @@ class AuthService {
 
     final response = await http.post(
       url,
-      headers: {'Content-Type': 'application/json'},
+      headers: const {
+        'Content-Type': 'application/json',
+        'ngrok-skip-browser-warning': 'true',
+      },
       body: jsonEncode(payload),
     );
 
     print('⬅️ Response: ${response.statusCode} ${response.body}');
 
     if (response.statusCode == 200 || response.statusCode == 201) {
-      return jsonDecode(response.body) as Map<String, dynamic>;
+      final data = jsonDecode(response.body);
+      return (data is Map) ? data.cast<String, dynamic>() : <String, dynamic>{};
     } else {
       throw Exception('Failed to register: ${response.body}');
     }
@@ -77,7 +86,10 @@ class AuthService {
 
     final response = await http.post(
       url,
-      headers: {'Content-Type': 'application/json'},
+      headers: const {
+        'Content-Type': 'application/json',
+        'ngrok-skip-browser-warning': 'true',
+      },
       body: jsonEncode(payload),
     );
 
@@ -122,14 +134,20 @@ class AuthService {
     final headers = await TokenManager.authHeaders();
     final response = await http.get(
       Uri.parse('${AppConfig.apiBaseUrl}/auth/profile'),
-      headers: {'Content-Type': 'application/json', ...headers},
+      headers: {
+        'Content-Type': 'application/json',
+        ...headers,
+        // headers already include the ngrok header, but harmless if duplicated
+        'ngrok-skip-browser-warning': 'true',
+      },
     );
 
     print('➡️ Fetching profile');
     print('⬅️ Response: ${response.statusCode} ${response.body}');
 
     if (response.statusCode == 200) {
-      return jsonDecode(response.body) as Map<String, dynamic>;
+      final data = jsonDecode(response.body);
+      return (data is Map) ? data.cast<String, dynamic>() : <String, dynamic>{};
     } else {
       throw Exception('Failed to load profile');
     }

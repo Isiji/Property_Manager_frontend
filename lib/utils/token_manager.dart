@@ -1,3 +1,4 @@
+// ignore_for_file: avoid_print
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:jwt_decoder/jwt_decoder.dart';
@@ -5,9 +6,14 @@ import 'package:jwt_decoder/jwt_decoder.dart';
 /// How long a session should live at most (even if server gives longer).
 const Duration kClientMaxSession = Duration(hours: 2);
 
+/// Special header that tells ngrok to skip the browser interstitial page.
+/// We’ll include it in all authenticated requests automatically.
+const String kNgrokBypassHeader = 'ngrok-skip-browser-warning';
+const String kNgrokBypassValue = 'true';
+
 class AuthSession {
   final String token;
-  final String role;     // admin | landlord | manager | tenant
+  final String role; // admin | landlord | manager | tenant
   final int userId;
   final DateTime expiresAt;
 
@@ -55,7 +61,7 @@ class TokenManager {
         jwtExp = exp;
       }
     } catch (_) {
-      // If parsing fails, we just ignore and rely on client cap.
+      // If parsing fails, ignore and rely on client cap.
     }
 
     final clientCap = now.add(kClientMaxSession);
@@ -101,8 +107,14 @@ class TokenManager {
   /// Use in your API client: `headers: await TokenManager.authHeaders()`
   static Future<Map<String, String>> authHeaders() async {
     final s = await loadSession();
-    if (s == null) return {};
-    return {'Authorization': 'Bearer ${s.token}'};
+    final headers = <String, String>{
+      // 👇 critical for ngrok: skip the browser warning interstitial
+      kNgrokBypassHeader: kNgrokBypassValue,
+    };
+    if (s != null) {
+      headers['Authorization'] = 'Bearer ${s.token}';
+    }
+    return headers;
   }
 
   /// For routing decisions (e.g., pick a dashboard).

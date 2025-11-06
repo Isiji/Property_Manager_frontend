@@ -7,6 +7,8 @@ import 'package:property_manager_frontend/utils/token_manager.dart';
 class PaymentService {
   static Map<String, String> _json(Map<String, String> h) => {
         'Content-Type': 'application/json',
+        // 👇 make sure every request through ngrok skips the warning page
+        'ngrok-skip-browser-warning': 'true',
         ...h,
       };
 
