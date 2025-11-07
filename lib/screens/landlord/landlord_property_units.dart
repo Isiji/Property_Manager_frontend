@@ -1,7 +1,7 @@
 // lib/screens/landlord/landlord_property_units.dart
-// UPDATED: adds optional "National ID" input on Assign Tenant dialog
-// and forwards it to TenantService.createTenant(idNumber: ...)
+// Adds auto-polling to refresh rent status so "Paid" flips by itself.
 
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:property_manager_frontend/services/property_service.dart';
 import 'package:property_manager_frontend/services/unit_service.dart';
@@ -25,10 +25,20 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
   // rent status cache: unit_id -> { paid: bool, lease_id: int?, amount_due, ... }
   Map<int, Map<String, dynamic>> _rentStatus = {};
 
+  Timer? _poll;
+
   @override
   void initState() {
     super.initState();
     _loadDetailed();
+    // poll every 10s to auto-flip Paid state after webhook writes
+    _poll = Timer.periodic(const Duration(seconds: 10), (_) => _loadRentStatus());
+  }
+
+  @override
+  void dispose() {
+    _poll?.cancel();
+    super.dispose();
   }
 
   String _currentPeriod() {
@@ -191,7 +201,7 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
         email: data.email?.trim().isEmpty == true ? null : data.email,
         propertyId: propertyId,
         unitId: unitId,
-        idNumber: data.idNumber, // NEW
+        idNumber: data.idNumber, // optional
       );
 
       final tenantId = (tenant['id'] as num?)?.toInt();
@@ -753,7 +763,7 @@ class _AssignTenantDialogState extends State<_AssignTenantDialog> {
   final _nameCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
   final _emailCtrl = TextEditingController();
-  final _idCtrl = TextEditingController();       // NEW
+  final _idCtrl = TextEditingController();       // NEW optional ID
   final _passwordCtrl = TextEditingController();
   final _rentCtrl = TextEditingController();
 
@@ -768,7 +778,7 @@ class _AssignTenantDialogState extends State<_AssignTenantDialog> {
     _nameCtrl.dispose();
     _phoneCtrl.dispose();
     _emailCtrl.dispose();
-    _idCtrl.dispose();         // NEW
+    _idCtrl.dispose();
     _passwordCtrl.dispose();
     _rentCtrl.dispose();
     super.dispose();
@@ -790,7 +800,7 @@ class _AssignTenantDialogState extends State<_AssignTenantDialog> {
         email: _emailCtrl.text.trim().isEmpty ? null : _emailCtrl.text.trim(),
         password: _passwordCtrl.text.trim().isEmpty ? null : _passwordCtrl.text.trim(),
         rentAmount: rent,
-        idNumber: _idCtrl.text.trim().isEmpty ? null : _idCtrl.text.trim(), // NEW
+        idNumber: _idCtrl.text.trim().isEmpty ? null : _idCtrl.text.trim(),
       ),
     );
   }
@@ -858,7 +868,7 @@ class _AssignTenantData {
   final String? email;
   final String? password;
   final num rentAmount;
-  final String? idNumber; // NEW
+  final String? idNumber;
   _AssignTenantData({
     required this.name,
     required this.phone,
