@@ -1,14 +1,14 @@
+// lib/services/payment_service.dart
 // ignore_for_file: avoid_print
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:property_manager_frontend/core/config.dart';
 import 'package:property_manager_frontend/utils/token_manager.dart';
+import 'package:property_manager_frontend/events/app_events.dart';
 
 class PaymentService {
   static Map<String, String> _json(Map<String, String> h) => {
         'Content-Type': 'application/json',
-        // 👇 make sure every request through ngrok skips the warning page
-        'ngrok-skip-browser-warning': 'true',
         ...h,
       };
 
@@ -50,6 +50,8 @@ class PaymentService {
     print('[PaymentService] ← ${r.statusCode} ${r.body}');
     if (r.statusCode == 200 || r.statusCode == 201) {
       final b = jsonDecode(r.body);
+      // Manual record also counts as activity worth a refresh.
+      AppEvents.I.paymentActivity.add(null);
       return (b is Map) ? b.cast<String, dynamic>() : <String, dynamic>{};
     }
     throw Exception('Record payment failed: ${r.statusCode} ${r.body}');
@@ -65,6 +67,8 @@ class PaymentService {
     print('[PaymentService] ← ${r.statusCode} ${r.body}');
     if (r.statusCode == 200) {
       final b = jsonDecode(r.body);
+      // Not strictly needed, but you can refresh after reminders too.
+      AppEvents.I.paymentActivity.add(null);
       return (b is Map) ? b.cast<String, dynamic>() : <String, dynamic>{};
     }
     throw Exception('Reminder failed: ${r.statusCode} ${r.body}');
@@ -88,6 +92,8 @@ class PaymentService {
     print('[PaymentService] ← ${r.statusCode} ${r.body}');
     if (r.statusCode == 200) {
       final b = jsonDecode(r.body);
+      // 🔔 Fire-and-forget event so landlord screen does a single refresh.
+      AppEvents.I.paymentActivity.add(null);
       return (b is Map) ? b.cast<String, dynamic>() : <String, dynamic>{};
     }
     throw Exception('MPesa initiation failed: ${r.statusCode} ${r.body}');

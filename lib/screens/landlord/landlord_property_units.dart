@@ -1,8 +1,11 @@
 // lib/screens/landlord/landlord_property_units.dart
-// Adds auto-polling to refresh rent status so "Paid" flips by itself.
+// List + manage units, assign tenants, record payments.
+// Now listens to AppEvents.paymentActivity to do a ONE-SHOT _loadRentStatus() refresh
+// whenever a tenant initiates STK (or a manual record/reminder happens).
 
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:property_manager_frontend/events/app_events.dart';
 import 'package:property_manager_frontend/services/property_service.dart';
 import 'package:property_manager_frontend/services/unit_service.dart';
 import 'package:property_manager_frontend/services/tenant_service.dart';
@@ -25,19 +28,22 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
   // rent status cache: unit_id -> { paid: bool, lease_id: int?, amount_due, ... }
   Map<int, Map<String, dynamic>> _rentStatus = {};
 
-  Timer? _poll;
+  // 🔔 subscription to payment activity (one-shot refresh)
+  StreamSubscription<void>? _paySub;
 
   @override
   void initState() {
     super.initState();
+    // When tenant initiates STK (or landlord records/reminds), refresh rent status once.
+    _paySub = AppEvents.I.paymentActivity.stream.listen((_) {
+      _loadRentStatus(); // quick and cheap
+    });
     _loadDetailed();
-    // poll every 10s to auto-flip Paid state after webhook writes
-    _poll = Timer.periodic(const Duration(seconds: 10), (_) => _loadRentStatus());
   }
 
   @override
   void dispose() {
-    _poll?.cancel();
+    _paySub?.cancel();
     super.dispose();
   }
 
@@ -201,7 +207,7 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
         email: data.email?.trim().isEmpty == true ? null : data.email,
         propertyId: propertyId,
         unitId: unitId,
-        idNumber: data.idNumber, // optional
+        idNumber: data.idNumber, // optional national ID
       );
 
       final tenantId = (tenant['id'] as num?)?.toInt();
@@ -300,6 +306,8 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
         amount: amount,
         paidDate: paidDate,
       );
+      // NOTE: _loadRentStatus() will also run via AppEvents, but doing an
+      // immediate local refresh is user-friendly here:
       await _loadRentStatus();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -423,7 +431,8 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
 
           Row(
             children: [
-              Text('Units • ${_currentPeriod()}', style: t.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
+              Text('Units • ${_currentPeriod()}',
+                  style: t.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
               const Spacer(),
               FilledButton.icon(
                 onPressed: _addUnit,
@@ -763,7 +772,7 @@ class _AssignTenantDialogState extends State<_AssignTenantDialog> {
   final _nameCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
   final _emailCtrl = TextEditingController();
-  final _idCtrl = TextEditingController();       // NEW optional ID
+  final _idCtrl = TextEditingController();       // optional national ID
   final _passwordCtrl = TextEditingController();
   final _rentCtrl = TextEditingController();
 
