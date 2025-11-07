@@ -1,11 +1,8 @@
 // lib/services/payment_service.dart
 // ignore_for_file: avoid_print
-
 import 'dart:convert';
 import 'dart:typed_data';
-// For web download
-// ignore: avoid_web_libraries_in_flutter
-import 'dart:html' as html;
+import 'dart:html' as html; // <-- for Flutter web download
 
 import 'package:http/http.dart' as http;
 import 'package:property_manager_frontend/core/config.dart';
@@ -56,7 +53,6 @@ class PaymentService {
     print('[PaymentService] ← ${r.statusCode} ${r.body}');
     if (r.statusCode == 200 || r.statusCode == 201) {
       final b = jsonDecode(r.body);
-      // Manual record also counts as activity worth a refresh.
       AppEvents.I.paymentActivity.add(null);
       return (b is Map) ? b.cast<String, dynamic>() : <String, dynamic>{};
     }
@@ -73,7 +69,6 @@ class PaymentService {
     print('[PaymentService] ← ${r.statusCode} ${r.body}');
     if (r.statusCode == 200) {
       final b = jsonDecode(r.body);
-      // Not strictly needed, but you can refresh after reminders too.
       AppEvents.I.paymentActivity.add(null);
       return (b is Map) ? b.cast<String, dynamic>() : <String, dynamic>{};
     }
@@ -98,18 +93,16 @@ class PaymentService {
     print('[PaymentService] ← ${r.statusCode} ${r.body}');
     if (r.statusCode == 200) {
       final b = jsonDecode(r.body);
-      // 🔔 Fire-and-forget event so landlord screen does a single refresh.
       AppEvents.I.paymentActivity.add(null);
       return (b is Map) ? b.cast<String, dynamic>() : <String, dynamic>{};
     }
     throw Exception('MPesa initiation failed: ${r.statusCode} ${r.body}');
   }
 
-  // ---------- PDF RECEIPT HELPERS ----------
+  // ---------- Receipts ----------
 
-  /// Direct URL for a PDF receipt. Requires Bearer auth header.
   static String receiptUrl(int paymentId) =>
-      '${AppConfig.apiBaseUrl}/payments/mpesa/receipt/$paymentId.pdf';
+      '${AppConfig.apiBaseUrl}/payments/receipt/$paymentId.pdf';
 
   /// Fetches the PDF and triggers a browser download (Flutter web).
   static Future<void> downloadReceiptPdf(int paymentId) async {

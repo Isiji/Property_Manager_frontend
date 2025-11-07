@@ -345,7 +345,6 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
                     SnackBar(content: Text('STK sent. Ref: ${res['checkout_id'] ?? '—'}')),
                   );
 
-                  // One refresh to reflect callback later (no constant polling here).
                   await _loadAll();
                 } catch (e) {
                   if (!mounted) return;
@@ -403,20 +402,33 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
         final raw = _payments[i];
         final p = (raw is Map) ? raw.cast<String, dynamic>() : <String, dynamic>{};
 
-        final paymentId = (p['id'] as num?)?.toInt();
+        final id = (p['id'] as num?)?.toInt();
         final period = (p['period'] ?? '').toString();
         final amount = (p['amount'] ?? '').toString();
         final date = (p['paid_date'] ?? '').toString();
         final ref = (p['reference'] ?? '').toString();
+        final status = (p['status'] ?? '').toString().toLowerCase();
 
-        // Status may be a string ("paid") or enum-ish object; coerce to string then check.
-        final statusStr = (p['status'] ?? '').toString().toLowerCase();
-        final isPaid = statusStr == 'paid' || statusStr == 'PaymentStatus.paid';
+        final isPaid = status == 'paid';
+        final statusChip = Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            color: isPaid ? t.colorScheme.tertiaryContainer : t.colorScheme.errorContainer,
+            borderRadius: BorderRadius.circular(999),
+          ),
+          child: Text(
+            (status.isEmpty ? 'pending' : status).toUpperCase(),
+            style: t.textTheme.labelSmall?.copyWith(
+              color: isPaid ? t.colorScheme.onTertiaryContainer : t.colorScheme.onErrorContainer,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        );
 
         return ListTile(
           leading: const Icon(Icons.receipt_long_rounded),
-          title: Text('Ksh $amount • $period', maxLines: 1, overflow: TextOverflow.ellipsis),
-          subtitle: Text(date.isEmpty ? '—' : date),
+          title: Text('KES $amount • $period', maxLines: 1, overflow: TextOverflow.ellipsis),
+          subtitle: Text(date.isEmpty ? '—' : 'Paid on $date'),
           trailing: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -425,36 +437,29 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
                   padding: const EdgeInsets.only(right: 8),
                   child: Text(ref, style: t.textTheme.labelSmall),
                 ),
-              if (isPaid && paymentId != null)
-                IconButton(
-                  tooltip: 'Download receipt',
+              statusChip,
+              const SizedBox(width: 8),
+              Tooltip(
+                message: isPaid ? 'Download receipt' : 'Receipt available after payment',
+                child: IconButton(
+                  onPressed: (isPaid && id != null)
+                      ? () async {
+                          try {
+                            await PaymentService.downloadReceiptPdf(id);
+                          } catch (e) {
+                            if (!mounted) return;
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('Download failed: $e')),
+                            );
+                          }
+                        }
+                      : null,
                   icon: const Icon(Icons.download_rounded),
-                  onPressed: () async {
-                    try {
-                      await PaymentService.downloadReceiptPdf(paymentId);
-                    } catch (e) {
-                      if (!mounted) return;
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('Download failed: $e')),
-                      );
-                    }
-                  },
                 ),
+              ),
             ],
           ),
-          onTap: () async {
-            // Optional: also trigger receipt download on tap if paid.
-            if (isPaid && paymentId != null) {
-              try {
-                await PaymentService.downloadReceiptPdf(paymentId);
-              } catch (e) {
-                if (!mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Download failed: $e')),
-                );
-              }
-            }
-          },
+          onTap: () {}, // could open a detail view later
         );
       },
     );
