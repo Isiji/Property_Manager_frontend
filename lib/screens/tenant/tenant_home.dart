@@ -318,45 +318,45 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
 
         Row(
           children: [
-          FilledButton.icon(
-            onPressed: () async {
-              try {
-                final d = _asMap(_dashboard);
-                final lease = _asMap(d['lease']);
-                final status = _asMap(d['this_month']);
-                final leaseId = (lease['id'] as num?)?.toInt();
-                final expected = (status['expected'] as num?) ?? 0;
+            FilledButton.icon(
+              onPressed: () async {
+                try {
+                  final d = _asMap(_dashboard);
+                  final lease = _asMap(d['lease']);
+                  final status = _asMap(d['this_month']);
+                  final leaseId = (lease['id'] as num?)?.toInt();
+                  final expected = (status['expected'] as num?) ?? 0;
 
-                if (leaseId == null || expected <= 0) {
+                  if (leaseId == null || expected <= 0) {
+                    if (!mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('No active lease or invalid amount')),
+                    );
+                    return;
+                  }
+
+                  final res = await PaymentService.initiateMpesa(
+                    leaseId: leaseId,
+                    amount: expected,
+                  );
+
                   if (!mounted) return;
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('No active lease or invalid amount')),
+                    SnackBar(content: Text('STK sent. Ref: ${res['checkout_id'] ?? '—'}')),
                   );
-                  return;
+
+                  // One refresh to reflect callback later (no constant polling here).
+                  await _loadAll();
+                } catch (e) {
+                  if (!mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Payment start failed: $e')),
+                  );
                 }
-
-                final res = await PaymentService.initiateMpesa(
-                  leaseId: leaseId,
-                  amount: expected,
-                );
-
-                if (!mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('STK sent. Ref: ${res['checkout_id'] ?? '—'}')),
-                );
-
-                // Optional: refresh after a short delay or a poll loop to reflect callback
-                await _loadAll();
-              } catch (e) {
-                if (!mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Payment start failed: $e')),
-                );
-              }
-            },
-            icon: const Icon(Icons.credit_card_rounded),
-            label: const Text('Pay Now'),
-          ),
+              },
+              icon: const Icon(Icons.credit_card_rounded),
+              label: const Text('Pay Now'),
+            ),
             const SizedBox(width: 8),
             OutlinedButton.icon(
               onPressed: _submitMaintenance,
@@ -400,18 +400,61 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
       itemCount: _payments.length,
       separatorBuilder: (_, __) => const Divider(height: 1),
       itemBuilder: (_, i) {
-        final p = _payments[i] as Map;
+        final raw = _payments[i];
+        final p = (raw is Map) ? raw.cast<String, dynamic>() : <String, dynamic>{};
+
+        final paymentId = (p['id'] as num?)?.toInt();
         final period = (p['period'] ?? '').toString();
         final amount = (p['amount'] ?? '').toString();
         final date = (p['paid_date'] ?? '').toString();
         final ref = (p['reference'] ?? '').toString();
 
+        // Status may be a string ("paid") or enum-ish object; coerce to string then check.
+        final statusStr = (p['status'] ?? '').toString().toLowerCase();
+        final isPaid = statusStr == 'paid' || statusStr == 'PaymentStatus.paid';
+
         return ListTile(
           leading: const Icon(Icons.receipt_long_rounded),
           title: Text('Ksh $amount • $period', maxLines: 1, overflow: TextOverflow.ellipsis),
           subtitle: Text(date.isEmpty ? '—' : date),
-          trailing: Text(ref.isEmpty ? '' : ref, style: t.textTheme.labelSmall),
-          onTap: () {/* future: open receipt */},
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (ref.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: Text(ref, style: t.textTheme.labelSmall),
+                ),
+              if (isPaid && paymentId != null)
+                IconButton(
+                  tooltip: 'Download receipt',
+                  icon: const Icon(Icons.download_rounded),
+                  onPressed: () async {
+                    try {
+                      await PaymentService.downloadReceiptPdf(paymentId);
+                    } catch (e) {
+                      if (!mounted) return;
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('Download failed: $e')),
+                      );
+                    }
+                  },
+                ),
+            ],
+          ),
+          onTap: () async {
+            // Optional: also trigger receipt download on tap if paid.
+            if (isPaid && paymentId != null) {
+              try {
+                await PaymentService.downloadReceiptPdf(paymentId);
+              } catch (e) {
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Download failed: $e')),
+                );
+              }
+            }
+          },
         );
       },
     );

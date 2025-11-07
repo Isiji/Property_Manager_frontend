@@ -1,6 +1,12 @@
 // lib/services/payment_service.dart
 // ignore_for_file: avoid_print
+
 import 'dart:convert';
+import 'dart:typed_data';
+// For web download
+// ignore: avoid_web_libraries_in_flutter
+import 'dart:html' as html;
+
 import 'package:http/http.dart' as http;
 import 'package:property_manager_frontend/core/config.dart';
 import 'package:property_manager_frontend/utils/token_manager.dart';
@@ -97,5 +103,29 @@ class PaymentService {
       return (b is Map) ? b.cast<String, dynamic>() : <String, dynamic>{};
     }
     throw Exception('MPesa initiation failed: ${r.statusCode} ${r.body}');
+  }
+
+  // ---------- PDF RECEIPT HELPERS ----------
+
+  /// Direct URL for a PDF receipt. Requires Bearer auth header.
+  static String receiptUrl(int paymentId) =>
+      '${AppConfig.apiBaseUrl}/payments/mpesa/receipt/$paymentId.pdf';
+
+  /// Fetches the PDF and triggers a browser download (Flutter web).
+  static Future<void> downloadReceiptPdf(int paymentId) async {
+    final h = await TokenManager.authHeaders();
+    final url = Uri.parse(receiptUrl(paymentId));
+    final r = await http.get(url, headers: h);
+    if (r.statusCode == 200) {
+      final bytes = Uint8List.fromList(r.bodyBytes);
+      final blob = html.Blob([bytes], 'application/pdf');
+      final blobUrl = html.Url.createObjectUrlFromBlob(blob);
+      final anchor = html.AnchorElement(href: blobUrl)
+        ..download = 'receipt_$paymentId.pdf'
+        ..click();
+      html.Url.revokeObjectUrl(blobUrl);
+      return;
+    }
+    throw Exception('Failed to download receipt: ${r.statusCode} ${r.body}');
   }
 }
