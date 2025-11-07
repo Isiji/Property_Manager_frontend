@@ -1,6 +1,6 @@
 // lib/screens/tenant/tenant_home.dart
 // Tenant portal with tabs: Dashboard, Payments, Maintenance, Profile.
-// Defensive casting to avoid crashes if backend returns partial/empty data.
+// Polished Payments UI + payment acknowledgement + receipt download.
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -239,6 +239,8 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
   Map<String, dynamic> _asMap(dynamic v) =>
       v is Map ? v.cast<String, dynamic>() : <String, dynamic>{};
 
+  bool _isTrue(dynamic v) => v == true || v?.toString().toLowerCase() == 'true';
+
   // ---------- tabs ----------
 
   Widget _dashboardTab(BuildContext context, ThemeData t) {
@@ -251,7 +253,7 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
     final propertyName = (unit['property_name'] ?? '').toString();
     final rent = (lease['rent_amount'] ?? '').toString();
 
-    final paid = status['paid'] == true;
+    final paid = _isTrue(status['paid']);
     final expected = (status['expected'] ?? 0).toString();
     final received = (status['received'] ?? 0).toString();
     final balance = (status['balance'] ?? 0).toString();
@@ -259,6 +261,33 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
+        // Friendly acknowledgement banner when this month is Paid
+        if (paid)
+          Container(
+            padding: const EdgeInsets.all(14),
+            margin: const EdgeInsets.only(bottom: 12),
+            decoration: BoxDecoration(
+              color: t.colorScheme.tertiaryContainer,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: t.dividerColor.withOpacity(.2)),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.check_circle_rounded, color: t.colorScheme.onTertiaryContainer),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Thanks! Your rent for this month is received. 🙌',
+                    style: t.textTheme.bodyMedium?.copyWith(
+                      color: t.colorScheme.onTertiaryContainer,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
         Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
@@ -392,76 +421,185 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
 
   Widget _paymentsTab(BuildContext context, ThemeData t) {
     if (_payments.isEmpty) {
-      return const Center(child: Text('No payments yet.'));
-    }
-    return ListView.separated(
-      padding: const EdgeInsets.all(16),
-      itemCount: _payments.length,
-      separatorBuilder: (_, __) => const Divider(height: 1),
-      itemBuilder: (_, i) {
-        final raw = _payments[i];
-        final p = (raw is Map) ? raw.cast<String, dynamic>() : <String, dynamic>{};
-
-        final id = (p['id'] as num?)?.toInt();
-        final period = (p['period'] ?? '').toString();
-        final amount = (p['amount'] ?? '').toString();
-        final date = (p['paid_date'] ?? '').toString();
-        final ref = (p['reference'] ?? '').toString();
-        final status = (p['status'] ?? '').toString().toLowerCase();
-
-        final isPaid = status == 'paid';
-        final statusChip = Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      return Center(
+        child: Container(
+          padding: const EdgeInsets.all(24),
           decoration: BoxDecoration(
-            color: isPaid ? t.colorScheme.tertiaryContainer : t.colorScheme.errorContainer,
-            borderRadius: BorderRadius.circular(999),
+            color: t.colorScheme.surface,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: t.dividerColor.withOpacity(.25)),
           ),
-          child: Text(
-            (status.isEmpty ? 'pending' : status).toUpperCase(),
-            style: t.textTheme.labelSmall?.copyWith(
-              color: isPaid ? t.colorScheme.onTertiaryContainer : t.colorScheme.onErrorContainer,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-        );
+          child: const Text('No payments yet — they will appear here once you start paying rent.'),
+        ),
+      );
+    }
 
-        return ListTile(
-          leading: const Icon(Icons.receipt_long_rounded),
-          title: Text('KES $amount • $period', maxLines: 1, overflow: TextOverflow.ellipsis),
-          subtitle: Text(date.isEmpty ? '—' : 'Paid on $date'),
-          trailing: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (ref.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: Text(ref, style: t.textTheme.labelSmall),
+    // Sort newest first if backend doesn’t already
+    final items = List<Map<String, dynamic>>.from(
+      _payments.map((e) => (e is Map) ? e.cast<String, dynamic>() : <String, dynamic>{}),
+    )..sort((a, b) {
+        final aCreated = DateTime.tryParse((a['created_at'] ?? '').toString()) ?? DateTime(1970);
+        final bCreated = DateTime.tryParse((b['created_at'] ?? '').toString()) ?? DateTime(1970);
+        return bCreated.compareTo(aCreated);
+      });
+
+    return RefreshIndicator(
+      onRefresh: _loadAll,
+      child: ListView.separated(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(16),
+        itemCount: items.length,
+        separatorBuilder: (_, __) => const SizedBox(height: 10),
+        itemBuilder: (_, i) {
+          final p = items[i];
+          final period = (p['period'] ?? '').toString();          // YYYY-MM
+          final amount = (p['amount'] ?? '').toString();
+          final date = (p['paid_date'] ?? '').toString();
+          final ref = (p['reference'] ?? '').toString();
+          final status = (p['status'] ?? '').toString().toLowerCase();
+          final id = (p['id'] as num?)?.toInt();
+
+          final isPaid = status == 'paid';
+          final statusBg = isPaid ? t.colorScheme.tertiaryContainer : t.colorScheme.errorContainer;
+          final statusFg = isPaid ? t.colorScheme.onTertiaryContainer : t.colorScheme.onErrorContainer;
+
+          // Nice month label like "Nov 2025"
+          String prettyMonth(String yyyymm) {
+            try {
+              final parts = yyyymm.split('-');
+              final d = DateTime(int.parse(parts[0]), int.parse(parts[1]), 1);
+              return DateFormat.yMMM().format(d);
+            } catch (_) {
+              return yyyymm;
+            }
+          }
+
+          return Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: t.colorScheme.surface,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: t.dividerColor.withOpacity(.25)),
+              boxShadow: [
+                BoxShadow(
+                  blurRadius: 12,
+                  spreadRadius: 0,
+                  offset: const Offset(0, 2),
+                  color: t.shadowColor.withOpacity(.06),
+                )
+              ],
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.receipt_long_rounded, size: 28),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Title line
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              'KSh $amount • ${prettyMonth(period)}',
+                              style: t.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            decoration: BoxDecoration(color: statusBg, borderRadius: BorderRadius.circular(999)),
+                            child: Text(
+                              isPaid ? 'PAID' : 'PENDING',
+                              style: t.textTheme.labelSmall?.copyWith(
+                                color: statusFg,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: .6,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+
+                      const SizedBox(height: 6),
+
+                      // Secondary details
+                      Wrap(
+                        spacing: 12,
+                        runSpacing: 4,
+                        children: [
+                          _meta(t, Icons.event_available_rounded, date.isEmpty ? '—' : date),
+                          _meta(t, Icons.numbers_rounded, ref.isEmpty ? '—' : ref),
+                          _meta(t, Icons.tag_rounded, 'Period: $period'),
+                        ],
+                      ),
+
+                      // Acknowledgement line for paid ones
+                      if (isPaid) ...[
+                        const SizedBox(height: 10),
+                        Text(
+                          'Thank you — your payment was received successfully.',
+                          style: t.textTheme.bodySmall?.copyWith(
+                            color: t.colorScheme.onSurface.withOpacity(.8),
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+
+                      const SizedBox(height: 12),
+
+                      // Actions: Download receipt if paid
+                      Row(
+                        children: [
+                          if (isPaid && id != null)
+                            OutlinedButton.icon(
+                              onPressed: () async {
+                                try {
+                                  await PaymentService.downloadReceiptPdf(id);
+                                  if (!mounted) return;
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(content: Text('Receipt download started')),
+                                  );
+                                } catch (e) {
+                                  if (!mounted) return;
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(content: Text('Download failed: $e')),
+                                  );
+                                }
+                              },
+                              icon: const Icon(Icons.download_rounded),
+                              label: const Text('Receipt (PDF)'),
+                            ),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
-              statusChip,
-              const SizedBox(width: 8),
-              Tooltip(
-                message: isPaid ? 'Download receipt' : 'Receipt available after payment',
-                child: IconButton(
-                  onPressed: (isPaid && id != null)
-                      ? () async {
-                          try {
-                            await PaymentService.downloadReceiptPdf(id);
-                          } catch (e) {
-                            if (!mounted) return;
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text('Download failed: $e')),
-                            );
-                          }
-                        }
-                      : null,
-                  icon: const Icon(Icons.download_rounded),
-                ),
-              ),
-            ],
-          ),
-          onTap: () {}, // could open a detail view later
-        );
-      },
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _meta(ThemeData t, IconData icon, String text) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: t.colorScheme.surfaceVariant.withOpacity(.4),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 16, color: t.colorScheme.onSurfaceVariant),
+          const SizedBox(width: 6),
+          Text(text, style: t.textTheme.labelSmall?.copyWith(color: t.colorScheme.onSurfaceVariant)),
+        ],
+      ),
     );
   }
 
