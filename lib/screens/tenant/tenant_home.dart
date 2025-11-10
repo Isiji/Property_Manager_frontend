@@ -1,18 +1,15 @@
 // lib/screens/tenant/tenant_home.dart
 // Tenant portal with tabs: Dashboard, Payments, Maintenance, Profile.
-// Notifications bell, polished Payments UI, payment acknowledgement, receipt download,
-// and quick lease actions (View / PDF) from the Dashboard.
+// Polished: payment acknowledgement, receipt download, slash-safe behavior.
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:property_manager_frontend/services/tenant_portal_service.dart';
 import 'package:property_manager_frontend/services/tenant_service.dart';
 import 'package:property_manager_frontend/services/payment_service.dart';
-import 'package:property_manager_frontend/services/lease_service.dart';
-import 'package:property_manager_frontend/services/notification_service.dart';
-import 'package:property_manager_frontend/widgets/notifications_sheet.dart';
 import 'package:property_manager_frontend/utils/token_manager.dart';
 import 'package:property_manager_frontend/services/auth_service.dart';
+import 'package:property_manager_frontend/services/lease_service.dart';
 
 class TenantHome extends StatefulWidget {
   const TenantHome({super.key});
@@ -28,13 +25,12 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
   Map<String, dynamic> _dashboard = const <String, dynamic>{};
   List<dynamic> _payments = const [];
   List<dynamic> _tickets = const [];
+  List<dynamic> _myLeases = const [];
 
   final _nameCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
   final _emailCtrl = TextEditingController();
   final _idCtrl = TextEditingController();
-
-  int _unread = 0; // notifications badge
 
   @override
   void initState() {
@@ -73,7 +69,6 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
         return;
       }
 
-      // Overview + lists
       try {
         final dash = await TenantPortalService.getOverview();
         _dashboard = dash is Map ? dash.cast<String, dynamic>() : <String, dynamic>{};
@@ -100,7 +95,13 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
         _tickets = const [];
       }
 
-      // Profile prefill
+      try {
+        final leases = await LeaseService.listLeasesForCurrentUser();
+        _myLeases = leases;
+      } catch (_) {
+        _myLeases = const [];
+      }
+
       try {
         final profile = await TenantPortalService.getProfile();
         final p = profile is Map ? profile.cast<String, dynamic>() : <String, dynamic>{};
@@ -109,14 +110,7 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
         _emailCtrl.text = (p['email'] ?? '').toString();
         _idCtrl.text = (p['id_number'] ?? '').toString();
       } catch (_) {
-        // ignore
-      }
-
-      // Notifications count
-      try {
-        _unread = await NotificationService.getUnreadCount();
-      } catch (_) {
-        _unread = 0;
+        // keep empty
       }
 
       if (mounted) setState(() {});
@@ -212,35 +206,6 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
     }
   }
 
-  // ---------- notifications ----------
-  Future<void> _openNotifications() async {
-    await showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      builder: (_) => const NotificationsSheet(),
-    );
-    try {
-      final c = await NotificationService.getUnreadCount();
-      if (!mounted) return;
-      setState(() => _unread = c);
-    } catch (_) {}
-  }
-
-  // ---------- helpers ----------
-  Map<String, dynamic> _asMap(dynamic v) =>
-      v is Map ? v.cast<String, dynamic>() : <String, dynamic>{};
-
-  bool _isTrue(dynamic v) => v == true || v?.toString().toLowerCase() == 'true';
-
-  int? _leaseIdFromDash() {
-    final d = _asMap(_dashboard);
-    final lease = _asMap(d['lease']);
-    return (lease['id'] as num?)?.toInt();
-  }
-
-  // ---------- tabs ----------
-
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context);
@@ -260,32 +225,6 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
           ],
         ),
         actions: [
-          // Notifications bell
-          IconButton(
-            onPressed: _openNotifications,
-            tooltip: 'Notifications',
-            icon: Stack(
-              clipBehavior: Clip.none,
-              children: [
-                const Icon(Icons.notifications_rounded),
-                if (_unread > 0)
-                  Positioned(
-                    top: -2, right: -2,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: t.colorScheme.error,
-                        borderRadius: BorderRadius.circular(999),
-                      ),
-                      child: Text(
-                        _unread > 99 ? '99+' : '$_unread',
-                        style: t.textTheme.labelSmall?.copyWith(color: t.colorScheme.onError),
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          ),
           IconButton(onPressed: _loadAll, icon: const Icon(Icons.refresh_rounded), tooltip: 'Refresh'),
           IconButton(onPressed: _logout, icon: const Icon(Icons.logout_rounded), tooltip: 'Logout'),
           const SizedBox(width: 8),
@@ -305,6 +244,14 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
     );
   }
 
+  // ---------- helpers ----------
+  Map<String, dynamic> _asMap(dynamic v) =>
+      v is Map ? v.cast<String, dynamic>() : <String, dynamic>{};
+
+  bool _isTrue(dynamic v) => v == true || v?.toString().toLowerCase() == 'true';
+
+  // ---------- tabs ----------
+
   Widget _dashboardTab(BuildContext context, ThemeData t) {
     final d = _asMap(_dashboard);
     final unit = _asMap(d['unit']);
@@ -319,8 +266,6 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
     final expected = (status['expected'] ?? 0).toString();
     final received = (status['received'] ?? 0).toString();
     final balance = (status['balance'] ?? 0).toString();
-
-    final leaseId = (lease['id'] as num?)?.toInt();
 
     return ListView(
       padding: const EdgeInsets.all(16),
@@ -454,33 +399,6 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
               icon: const Icon(Icons.build_rounded),
               label: const Text('Maintenance'),
             ),
-            const Spacer(),
-            if (leaseId != null) ...[
-              OutlinedButton.icon(
-                onPressed: () => Navigator.of(context).pushNamed('/lease_view', arguments: {'leaseId': leaseId}),
-                icon: const Icon(Icons.description_rounded),
-                label: const Text('View Lease'),
-              ),
-              const SizedBox(width: 8),
-              OutlinedButton.icon(
-                onPressed: () async {
-                  try {
-                    await LeaseService.downloadLeasePdf(leaseId);
-                    if (!mounted) return;
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Lease download started')),
-                    );
-                  } catch (e) {
-                    if (!mounted) return;
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Failed: $e')),
-                    );
-                  }
-                },
-                icon: const Icon(Icons.picture_as_pdf_rounded),
-                label: const Text('Lease PDF'),
-              ),
-            ],
           ],
         ),
       ],
@@ -524,7 +442,6 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
       );
     }
 
-    // Sort newest first if backend doesn’t already
     final items = List<Map<String, dynamic>>.from(
       _payments.map((e) => (e is Map) ? e.cast<String, dynamic>() : <String, dynamic>{}),
     )..sort((a, b) {
@@ -587,7 +504,6 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Title line
                       Row(
                         children: [
                           Expanded(
@@ -614,7 +530,6 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
 
                       const SizedBox(height: 6),
 
-                      // Secondary details
                       Wrap(
                         spacing: 12,
                         runSpacing: 4,
@@ -625,7 +540,6 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
                         ],
                       ),
 
-                      // Acknowledgement line for paid ones
                       if (isPaid) ...[
                         const SizedBox(height: 10),
                         Text(
@@ -639,7 +553,6 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
 
                       const SizedBox(height: 12),
 
-                      // Actions: Download receipt if paid
                       Row(
                         children: [
                           if (isPaid && id != null)
