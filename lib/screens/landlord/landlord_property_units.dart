@@ -1,8 +1,10 @@
 // Landlord property units screen
-// Fixes:
-// - Derive displayed occupancy from lease.active (truth wins over server 'status').
-// - Handle 409 “tenant already exists (id=XX)” by linking existing tenant to the unit.
-// - Keep tenant backfill, copy/call/WhatsApp, reminders, and collections summary.
+// - Remind All + Reports placed in the header card (right), clearer contrast.
+// - Derives displayed occupancy from lease.active (wins over server 'status').
+// - Handles 409 “tenant already exists (id=XX)” by linking existing tenant.
+// - Copy/Call/WhatsApp actions for tenant phone; copy property code.
+// - Collections summary card.
+// - Backfills tenant name/phone via /units/{id}/tenant when lease is active but tenant is null.
 
 import 'dart:async';
 import 'dart:convert';
@@ -16,6 +18,7 @@ import 'package:property_manager_frontend/services/unit_service.dart';
 import 'package:property_manager_frontend/services/tenant_service.dart';
 import 'package:property_manager_frontend/services/lease_service.dart';
 import 'package:property_manager_frontend/services/payment_service.dart';
+import 'package:property_manager_frontend/screens/landlord/landlord_reports.dart';
 
 class LandlordPropertyUnits extends StatefulWidget {
   final int propertyId;
@@ -54,7 +57,7 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
   String _todayDate() {
     final now = DateTime.now();
     final d = DateTime(now.year, now.month, now.day);
-    return d.toIso8601String().split('T').first; // YYYY-MM-DD
+    return d.toIso8601String().split('T').first;
   }
 
   String _fmtMoney(num? n) {
@@ -70,7 +73,6 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
   }
 
   bool _isLeaseActive(dynamic leaseActive) {
-    // backend sometimes returns 1/0 or true/false
     return leaseActive == true || leaseActive == 1 || leaseActive == '1';
   }
 
@@ -85,9 +87,10 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
     int paidCount = 0, unpaidCount = 0, occUnits = 0;
 
     for (final u in _units) {
-      final status = _displayedStatus(u as Map<String, dynamic>);
-      final rent = _parseNum(u['rent_amount']);
-      final unitId = (u['id'] as num).toInt();
+      final unit = u as Map<String, dynamic>;
+      final status = _displayedStatus(unit);
+      final rent = _parseNum(unit['rent_amount']);
+      final unitId = (unit['id'] as num).toInt();
       final rs = _rentStatus[unitId];
 
       if (status == 'occupied') {
@@ -109,7 +112,6 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
         }
       }
     }
-
     final outstanding = expected - collected;
     final tot = _units.isEmpty ? 1 : _units.length;
 
@@ -132,10 +134,7 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
         _property = detail;
         _units = (detail['units'] as List<dynamic>? ?? []);
       });
-
-      // Backfill missing tenants for occupied units
       await _backfillTenants();
-
       await _loadRentStatus();
     } catch (e) {
       debugPrint('[PropertyUnits] load error: $e');
@@ -280,19 +279,15 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
     } catch (e) {
       debugPrint('[PropertyUnits] delete unit error: $e');
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('$e')),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
     }
   }
 
-  // Parse: {"detail":"Tenant with phone 0723458751 already exists (id=13)"}
   int? _extractTenantIdFrom409(Object err) {
     final msg = err.toString();
     final re = RegExp(r'id=(\d+)');
     final m = re.firstMatch(msg);
     if (m != null) return int.tryParse(m.group(1)!);
-    // sometimes backend may send JSON; try to decode once
     try {
       final json = jsonDecode(msg);
       final detail = json['detail']?.toString() ?? '';
@@ -316,7 +311,6 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
       final propertyId = _property?['id'] as int? ?? widget.propertyId;
       final unitId = unit['id'] as int;
 
-      // 1) Try create tenant
       final tenant = await TenantService.createTenant(
         name: data.name,
         phone: data.phone,
@@ -328,7 +322,6 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
       final tenantId = (tenant['id'] as num?)?.toInt();
       if (tenantId == null) throw Exception('Backend did not return tenant id');
 
-      // 2) Create lease
       final today = _todayDate();
       await LeaseService.createLease(
         tenantId: tenantId,
@@ -344,7 +337,6 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
         const SnackBar(content: Text('Tenant assigned and lease created')),
       );
     } catch (e) {
-      // Handle duplicate tenant by linking existing one
       final existingId = _extractTenantIdFrom409(e);
       if (existingId != null) {
         try {
@@ -589,7 +581,6 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
     final total = _property!['total_units'] ?? _units.length;
     final occupiedCount = _units.where((u) => _displayedStatus(u as Map<String, dynamic>) == 'occupied').length;
     final vacant = total - occupiedCount;
-
     final summary = _computeCollections();
 
     return Scaffold(
@@ -607,7 +598,7 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          // Header card
+          // ===== Header card (buttons here) =====
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
@@ -618,7 +609,9 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // Title + Actions (right)
                 Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Expanded(
                       child: Text(
@@ -626,16 +619,25 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
                         style: t.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
                       ),
                     ),
-                    FilledButton.icon(
-                      onPressed: _sendBulkReminders,
-                      icon: const Icon(Icons.campaign_rounded),
-                      label: const Text('Remind All Unpaid'),
-                    ),
-                    const SizedBox(width: 8),
-                    OutlinedButton.icon(
-                      onPressed: () => Navigator.of(context).pushNamed('/landlord_payouts'),
-                      icon: const Icon(Icons.account_balance_wallet_outlined),
-                      label: const Text('Payout Methods'),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        ElevatedButton.icon(
+                          onPressed: () {
+                            Navigator.of(context).push(MaterialPageRoute(
+                              builder: (_) => LandlordReportsScreen(propertyId: _property!['id'] as int),
+                            ));
+                          },
+                          icon: const Icon(Icons.analytics_outlined, size: 18),
+                          label: const Text('Reports'),
+                        ),
+                        FilledButton.icon(
+                          onPressed: _sendBulkReminders,
+                          icon: const Icon(Icons.campaign_rounded, size: 18),
+                          label: const Text('Remind All Unpaid'),
+                        ),
+                      ],
                     ),
                   ],
                 ),
@@ -670,7 +672,7 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
 
           const SizedBox(height: 16),
 
-          // Collections report
+          // Collections summary
           _CollectionsReportCard(
             periodLabel: _currentPeriod(),
             expected: summary['expected'] ?? 0,
@@ -933,9 +935,7 @@ class _TenantCell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final t = Theme.of(context);
     final isUnknown = phone.trim().isEmpty || phone == '—';
-
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -1040,7 +1040,8 @@ class _MetricPill extends StatelessWidget {
   }
 }
 
-// Dialogs (unchanged)
+// ---- Dialogs ----
+
 class _UnitDialog extends StatefulWidget {
   final String? initialNumber;
   final String? initialRent;
@@ -1048,6 +1049,7 @@ class _UnitDialog extends StatefulWidget {
   @override
   State<_UnitDialog> createState() => _UnitDialogState();
 }
+
 class _UnitDialogState extends State<_UnitDialog> {
   final _formKey = GlobalKey<FormState>();
   final _numCtrl = TextEditingController();
@@ -1068,16 +1070,27 @@ class _UnitDialogState extends State<_UnitDialog> {
         key: _formKey,
         child: SizedBox(
           width: 420,
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            TextFormField(controller: _numCtrl, decoration: const InputDecoration(labelText: 'Unit Number/Name'),
-              validator: (v) => (v == null || v.trim().isEmpty) ? 'Unit number is required' : null),
-            const SizedBox(height: 12),
-            TextFormField(controller: _rentCtrl, decoration: const InputDecoration(labelText: 'Rent Amount'),
-              keyboardType: TextInputType.number, validator: (v) => (v == null || v.trim().isEmpty) ? 'Rent amount is required' : null),
-          ]),
+          child: Column(
+            mainAxisSize: MainAxisSize.min, // <-- fixed here
+            children: [
+              TextFormField(
+                controller: _numCtrl,
+                decoration: const InputDecoration(labelText: 'Unit Number/Name'),
+                validator: (v) => (v == null || v.trim().isEmpty) ? 'Unit number is required' : null,
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _rentCtrl,
+                decoration: const InputDecoration(labelText: 'Rent Amount'),
+                keyboardType: TextInputType.number,
+                validator: (v) => (v == null || v.trim().isEmpty) ? 'Rent amount is required' : null,
+              ),
+            ],
+          ),
         ),
       ),
-      actions: [ TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
         FilledButton(onPressed: _submit, child: const Text('Save')),
       ],
     );
@@ -1157,25 +1170,39 @@ class _AssignTenantDialogState extends State<_AssignTenantDialog> {
         key: _formKey,
         child: SizedBox(
           width: 460,
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            TextFormField(controller: _nameCtrl, decoration: const InputDecoration(labelText: 'Tenant Name'),
-              validator: (v) => (v == null || v.trim().isEmpty) ? 'Name is required' : null),
-            const SizedBox(height: 10),
-            TextFormField(controller: _phoneCtrl, decoration: const InputDecoration(labelText: 'Phone'),
-              validator: (v) => (v == null || v.trim().isEmpty) ? 'Phone is required' : null),
-            const SizedBox(height: 10),
-            TextFormField(controller: _emailCtrl, decoration: const InputDecoration(labelText: 'Email (optional)')),
-            const SizedBox(height: 10),
-            TextFormField(controller: _idCtrl, decoration: const InputDecoration(labelText: 'National ID (optional)')),
-            const SizedBox(height: 10),
-            TextFormField(controller: _passwordCtrl, decoration: const InputDecoration(labelText: 'Password (optional)'), obscureText: true),
-            const SizedBox(height: 12),
-            TextFormField(controller: _rentCtrl, decoration: const InputDecoration(labelText: 'Rent Amount'),
-              keyboardType: TextInputType.number, validator: (v) => (v == null || v.trim().isEmpty) ? 'Rent amount is required' : null),
-          ]),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextFormField(
+                controller: _nameCtrl,
+                decoration: const InputDecoration(labelText: 'Tenant Name'),
+                validator: (v) => (v == null || v.trim().isEmpty) ? 'Name is required' : null,
+              ),
+              const SizedBox(height: 10),
+              TextFormField(
+                controller: _phoneCtrl,
+                decoration: const InputDecoration(labelText: 'Phone'),
+                validator: (v) => (v == null || v.trim().isEmpty) ? 'Phone is required' : null,
+              ),
+              const SizedBox(height: 10),
+              TextFormField(controller: _emailCtrl, decoration: const InputDecoration(labelText: 'Email (optional)')),
+              const SizedBox(height: 10),
+              TextFormField(controller: _idCtrl, decoration: const InputDecoration(labelText: 'National ID (optional)')),
+              const SizedBox(height: 10),
+              TextFormField(controller: _passwordCtrl, decoration: const InputDecoration(labelText: 'Password (optional)'), obscureText: true),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _rentCtrl,
+                decoration: const InputDecoration(labelText: 'Rent Amount'),
+                keyboardType: TextInputType.number,
+                validator: (v) => (v == null || v.trim().isEmpty) ? 'Rent amount is required' : null,
+              ),
+            ],
+          ),
         ),
       ),
-      actions: [ TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
         FilledButton(onPressed: _submit, child: const Text('Assign')),
       ],
     );
