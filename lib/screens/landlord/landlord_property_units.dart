@@ -1,10 +1,14 @@
-// lib/screens/landlord/landlord_property_units.dart
-// List + manage units, assign tenants, record payments.
-// Now: slash-safe API calls, clean end-lease flow (end lease → mark vacant → delete tenant),
-// bulk reminders with message, and rent status one-shot refresh via AppEvents.paymentActivity.
+// Landlord property units screen
+// Frontend-only fixes:
+// - After loading detailed property, backfill missing tenant info per occupied unit via /units/{id}/tenant.
+// - Keep reminders, report, copy/call/WhatsApp actions.
+// - Avoid redundant update calls that used to trigger backend validation failures.
 
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
+
 import 'package:property_manager_frontend/events/app_events.dart';
 import 'package:property_manager_frontend/services/property_service.dart';
 import 'package:property_manager_frontend/services/unit_service.dart';
@@ -22,12 +26,9 @@ class LandlordPropertyUnits extends StatefulWidget {
 
 class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
   bool _loading = true;
-  Map<String, dynamic>? _property; // detail
+  Map<String, dynamic>? _property;
   List<dynamic> _units = [];
-
-  // rent status cache: unit_id -> { paid: bool, amount_due, ... }
   Map<int, Map<String, dynamic>> _rentStatus = {};
-
   StreamSubscription<void>? _paySub;
 
   @override
@@ -55,6 +56,61 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
     return d.toIso8601String().split('T').first; // YYYY-MM-DD
   }
 
+  String _fmtMoney(num? n) {
+    if (n == null) return '0';
+    final isInt = (n % 1) == 0;
+    return isInt ? n.toStringAsFixed(0) : n.toStringAsFixed(2);
+  }
+
+  num _parseNum(dynamic v) {
+    if (v == null) return 0;
+    if (v is num) return v;
+    return num.tryParse(v.toString()) ?? 0;
+  }
+
+  Map<String, num> _computeCollections() {
+    num expected = 0, collected = 0;
+    int paidCount = 0, unpaidCount = 0, occUnits = 0;
+
+    for (final u in _units) {
+      final status = (u['status'] ?? 'vacant').toString().toLowerCase();
+      final rent = _parseNum(u['rent_amount']);
+      final unitId = (u['id'] as num).toInt();
+      final rs = _rentStatus[unitId];
+
+      if (status == 'occupied') {
+        occUnits += 1;
+        expected += rent;
+        if (rs != null) {
+          final isPaid = rs['paid'] == true;
+          if (isPaid) {
+            paidCount += 1;
+            collected += rent;
+          } else {
+            unpaidCount += 1;
+            final due = _parseNum(rs['amount_due']);
+            final got = rent - (due > rent ? rent : due);
+            if (got > 0) collected += got;
+          }
+        } else {
+          unpaidCount += 1;
+        }
+      }
+    }
+
+    final outstanding = expected - collected;
+    final tot = _units.isEmpty ? 1 : _units.length;
+
+    return {
+      'expected': expected,
+      'collected': collected < 0 ? 0 : collected,
+      'outstanding': outstanding < 0 ? 0 : outstanding,
+      'paidCount': paidCount,
+      'unpaidCount': unpaidCount,
+      'occupancyPct': (occUnits * 100) / tot,
+    };
+  }
+
   Future<void> _loadDetailed() async {
     try {
       setState(() => _loading = true);
@@ -64,6 +120,10 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
         _property = detail;
         _units = (detail['units'] as List<dynamic>? ?? []);
       });
+
+      // Backfill missing tenants for occupied units
+      await _backfillTenants();
+
       await _loadRentStatus();
     } catch (e) {
       debugPrint('[PropertyUnits] load error: $e');
@@ -73,6 +133,40 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
       );
     } finally {
       if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _backfillTenants() async {
+    // For each occupied unit without tenant info, try /units/{id}/tenant
+    final futures = <Future<void>>[];
+    for (var i = 0; i < _units.length; i++) {
+      final u = _units[i] as Map<String, dynamic>;
+      final status = (u['status'] ?? 'vacant').toString().toLowerCase();
+      final hasTenant = u['tenant'] != null && (u['tenant']['phone']?.toString().trim().isNotEmpty == true);
+      if (status == 'occupied' && !hasTenant) {
+        final unitId = (u['id'] as num).toInt();
+        futures.add(_loadAndPatchTenant(i, unitId));
+      }
+    }
+    await Future.wait(futures);
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _loadAndPatchTenant(int index, int unitId) async {
+    try {
+      final tnt = await UnitService.getUnitTenant(unitId);
+      if (tnt == null) return;
+      // Patch minimal tenant info into the unit row
+      final u = Map<String, dynamic>.from(_units[index] as Map<String, dynamic>);
+      u['tenant'] = {
+        'id': tnt['id'],
+        'name': tnt['name'],
+        'phone': tnt['phone'],
+        'email': tnt['email'],
+      };
+      _units[index] = u;
+    } catch (e) {
+      debugPrint('[PropertyUnits] backfill tenant failed for unit $unitId: $e');
     }
   }
 
@@ -204,11 +298,8 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
         unitId: unitId,
         idNumber: data.idNumber,
       );
-
       final tenantId = (tenant['id'] as num?)?.toInt();
-      if (tenantId == null) {
-        throw Exception('Backend did not return tenant id');
-      }
+      if (tenantId == null) throw Exception('Backend did not return tenant id');
 
       final today = _todayDate();
       await LeaseService.createLease(
@@ -216,11 +307,10 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
         unitId: unitId,
         rentAmount: data.rentAmount,
         startDate: today,
-        active: 1, // auto-active; tenant can accept T&Cs later if your API supports it
+        active: 1,
       );
 
-      await UnitService.updateUnit(unitId: unitId, occupied: 1);
-
+      // Just refresh; backend flips occupancy.
       await _loadDetailed();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -238,9 +328,7 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
   Future<void> _endLease(Map<String, dynamic> unit) async {
     final leaseId = (unit['lease']?['id'] as num?)?.toInt();
     final tenantId = (unit['tenant']?['id'] as num?)?.toInt();
-    final unitId = (unit['id'] as num?)?.toInt();
-
-    if (leaseId == null || unitId == null) {
+    if (leaseId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('No active lease or invalid unit')),
       );
@@ -262,14 +350,8 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
 
     try {
       final today = _todayDate();
-
-      // 1) End the lease (with slash-safe fallback handled inside service)
       await LeaseService.endLease(leaseId: leaseId, endDate: today);
 
-      // 2) Mark unit vacant
-      await UnitService.updateUnit(unitId: unitId, occupied: 0);
-
-      // 3) Delete tenant (POSitional argument)
       if (tenantId != null) {
         await TenantService.deleteTenant(tenantId);
       }
@@ -298,7 +380,6 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
     }
 
     final rent = (unit['rent_amount'] ?? '').toString();
-
     final amount = await showDialog<num?>(
       context: context,
       builder: (_) => _PaymentDialog(initialAmount: rent),
@@ -306,8 +387,8 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
     if (amount == null) return;
 
     try {
-      final period = _currentPeriod();     // YYYY-MM
-      final paidDate = _todayDate();       // YYYY-MM-DD
+      final period = _currentPeriod();
+      final paidDate = _todayDate();
       await PaymentService.recordPayment(
         leaseId: leaseId,
         period: period,
@@ -409,6 +490,33 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
     }
   }
 
+  Future<void> _copyText(String label, String text) async {
+    await Clipboard.setData(ClipboardData(text: text));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$label copied')));
+  }
+
+  Future<void> _launchPhone(String phone) async {
+    final uri = Uri(scheme: 'tel', path: phone);
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri);
+    } else {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Unable to open dialer')));
+    }
+  }
+
+  Future<void> _launchWhatsApp(String phone) async {
+    final normalized = phone.replaceAll(RegExp(r'[\s\-\(\)\+]'), '');
+    final uri = Uri.parse('https://wa.me/$normalized');
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } else {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Unable to open WhatsApp')));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context);
@@ -427,16 +535,12 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
     final occupied = _property!['occupied_units'] ?? (_units.where((u) => (u['status'] ?? '') == 'occupied').length);
     final vacant = _property!['vacant_units'] ?? (total - occupied);
 
+    final summary = _computeCollections();
+
     return Scaffold(
       appBar: AppBar(
         title: Text(name),
         actions: [
-          OutlinedButton.icon(
-            onPressed: _sendBulkReminders,
-            icon: const Icon(Icons.campaign_rounded, size: 18),
-            label: const Text('Remind All Unpaid'),
-          ),
-          const SizedBox(width: 8),
           IconButton(
             onPressed: _loadDetailed,
             tooltip: 'Refresh',
@@ -448,7 +552,7 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          // Header card with Payout button
+          // Header card
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
@@ -467,6 +571,12 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
                         style: t.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
                       ),
                     ),
+                    FilledButton.icon(
+                      onPressed: _sendBulkReminders,
+                      icon: const Icon(Icons.campaign_rounded),
+                      label: const Text('Remind All Unpaid'),
+                    ),
+                    const SizedBox(width: 8),
                     OutlinedButton.icon(
                       onPressed: () => Navigator.of(context).pushNamed('/landlord_payouts'),
                       icon: const Icon(Icons.account_balance_wallet_outlined),
@@ -486,15 +596,35 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
                 Wrap(
                   spacing: 16,
                   runSpacing: 10,
+                  crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
                     _InfoChip(icon: Icons.grid_view_rounded, label: 'Total', value: '$total'),
                     _InfoChip(icon: Icons.person_pin_circle_rounded, label: 'Occupied', value: '$occupied'),
                     _InfoChip(icon: Icons.meeting_room_rounded, label: 'Vacant', value: '$vacant'),
-                    _InfoChip(icon: Icons.qr_code_2_rounded, label: 'Property Code', value: code),
+                    _CopyableChip(
+                      icon: Icons.qr_code_2_rounded,
+                      label: 'Property Code',
+                      value: code,
+                      onCopy: () => _copyText('Property code', code.toString()),
+                    ),
                   ],
                 ),
               ],
             ),
+          ),
+
+          const SizedBox(height: 16),
+
+          // Collections report
+          _CollectionsReportCard(
+            periodLabel: _currentPeriod(),
+            expected: summary['expected'] ?? 0,
+            collected: summary['collected'] ?? 0,
+            outstanding: summary['outstanding'] ?? 0,
+            paidCount: (summary['paidCount'] ?? 0).toInt(),
+            unpaidCount: (summary['unpaidCount'] ?? 0).toInt(),
+            occupancyPct: summary['occupancyPct'] ?? 0,
+            formatter: _fmtMoney,
           ),
 
           const SizedBox(height: 20),
@@ -550,7 +680,6 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
 
                     final tenantName = (u['tenant']?['name'] ?? '—').toString();
                     final tenantPhone = (u['tenant']?['phone'] ?? '—').toString();
-                    final tenantDisplay = u['tenant'] == null ? '—' : '$tenantName • $tenantPhone';
 
                     final rs = _rentStatus[unitId];
                     final paid = rs?['paid'] == true;
@@ -561,7 +690,19 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
                         DataCell(Text(u['number']?.toString() ?? '—')),
                         DataCell(Text(rent)),
                         DataCell(_statusChip(status, t)),
-                        DataCell(Text(tenantDisplay)),
+                        DataCell(_TenantCell(
+                          name: tenantName,
+                          phone: tenantPhone,
+                          onCopy: tenantPhone.trim().isEmpty || tenantPhone == '—'
+                              ? null
+                              : () => _copyText('Phone', tenantPhone),
+                          onCall: tenantPhone.trim().isEmpty || tenantPhone == '—'
+                              ? null
+                              : () => _launchPhone(tenantPhone),
+                          onWhatsApp: tenantPhone.trim().isEmpty || tenantPhone == '—'
+                              ? null
+                              : () => _launchWhatsApp(tenantPhone),
+                        )),
                         DataCell(_rentChip(paid, amountDue, t)),
                         DataCell(Row(
                           children: [
@@ -686,49 +827,183 @@ class _InfoChip extends StatelessWidget {
   }
 }
 
+class _CopyableChip extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String value;
+  final VoidCallback onCopy;
+  const _CopyableChip({required this.icon, required this.label, required this.value, required this.onCopy});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: t.colorScheme.surface,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: t.dividerColor.withOpacity(.25)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 18, color: t.hintColor),
+          const SizedBox(width: 6),
+          Text('$label: ', style: t.textTheme.labelMedium),
+          Text(value, style: t.textTheme.labelMedium?.copyWith(fontWeight: FontWeight.w800)),
+          const SizedBox(width: 6),
+          InkWell(
+            onTap: onCopy,
+            borderRadius: BorderRadius.circular(999),
+            child: const Padding(
+              padding: EdgeInsets.all(4.0),
+              child: Icon(Icons.copy_rounded, size: 16),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TenantCell extends StatelessWidget {
+  final String name;
+  final String phone;
+  final VoidCallback? onCopy;
+  final VoidCallback? onCall;
+  final VoidCallback? onWhatsApp;
+
+  const _TenantCell({required this.name, required this.phone, this.onCopy, this.onCall, this.onWhatsApp});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context);
+    final isUnknown = phone.trim().isEmpty || phone == '—';
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Flexible(
+          child: Text(name == '—' ? '—' : '$name • $phone', overflow: TextOverflow.ellipsis),
+        ),
+        if (!isUnknown) const SizedBox(width: 6),
+        if (!isUnknown)
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(tooltip: 'Copy phone', onPressed: onCopy, icon: const Icon(Icons.copy_rounded, size: 18), splashRadius: 18),
+              IconButton(tooltip: 'Call', onPressed: onCall, icon: const Icon(Icons.call_rounded, size: 18), splashRadius: 18),
+              IconButton(tooltip: 'WhatsApp', onPressed: onWhatsApp, icon: const Icon(Icons.chat_rounded, size: 18), splashRadius: 18),
+            ],
+          ),
+      ],
+    );
+  }
+}
+
+class _CollectionsReportCard extends StatelessWidget {
+  final String periodLabel;
+  final num expected;
+  final num collected;
+  final num outstanding;
+  final int paidCount;
+  final int unpaidCount;
+  final num occupancyPct;
+  final String Function(num) formatter;
+
+  const _CollectionsReportCard({
+    required this.periodLabel,
+    required this.expected,
+    required this.collected,
+    required this.outstanding,
+    required this.paidCount,
+    required this.unpaidCount,
+    required this.occupancyPct,
+    required this.formatter,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: t.colorScheme.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: t.dividerColor.withOpacity(.25)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Collections Report • $periodLabel', style: t.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 16,
+            runSpacing: 10,
+            children: [
+              _MetricPill(label: 'Expected', value: 'KES ${formatter(expected)}', icon: Icons.request_quote_rounded),
+              _MetricPill(label: 'Collected', value: 'KES ${formatter(collected)}', icon: Icons.payments_rounded),
+              _MetricPill(label: 'Outstanding', value: 'KES ${formatter(outstanding)}', icon: Icons.account_balance_wallet_outlined),
+              _MetricPill(label: 'Paid Units', value: '$paidCount', icon: Icons.check_circle_rounded),
+              _MetricPill(label: 'Unpaid Units', value: '$unpaidCount', icon: Icons.error_outline_rounded),
+              _MetricPill(label: 'Occupancy', value: '${occupancyPct.toStringAsFixed(0)}%', icon: Icons.apartment_rounded),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MetricPill extends StatelessWidget {
+  final String label;
+  final String value;
+  final IconData icon;
+  const _MetricPill({required this.label, required this.value, required this.icon});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: t.colorScheme.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: t.dividerColor.withOpacity(.25)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 18, color: t.hintColor),
+          const SizedBox(width: 8),
+          Text('$label: ', style: t.textTheme.labelMedium),
+          Text(value, style: t.textTheme.labelMedium?.copyWith(fontWeight: FontWeight.w800)),
+        ],
+      ),
+    );
+  }
+}
+
+// Dialogs (unchanged)
 class _UnitDialog extends StatefulWidget {
   final String? initialNumber;
   final String? initialRent;
-
   const _UnitDialog({Key? key, this.initialNumber, this.initialRent}) : super(key: key);
-
   @override
   State<_UnitDialog> createState() => _UnitDialogState();
 }
-
 class _UnitDialogState extends State<_UnitDialog> {
   final _formKey = GlobalKey<FormState>();
   final _numCtrl = TextEditingController();
   final _rentCtrl = TextEditingController();
-
-  @override
-  void initState() {
-    super.initState();
-    _numCtrl.text = widget.initialNumber ?? '';
-    _rentCtrl.text = widget.initialRent ?? '';
-  }
-
-  @override
-  void dispose() {
-    _numCtrl.dispose();
-    _rentCtrl.dispose();
-    super.dispose();
-  }
-
+  @override void initState() { super.initState(); _numCtrl.text = widget.initialNumber ?? ''; _rentCtrl.text = widget.initialRent ?? ''; }
+  @override void dispose() { _numCtrl.dispose(); _rentCtrl.dispose(); super.dispose(); }
   void _submit() {
     if (!_formKey.currentState!.validate()) return;
     final rent = double.tryParse(_rentCtrl.text.trim());
-    if (rent == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Enter a valid rent amount')),
-      );
-      return;
-    }
-    Navigator.of(context).pop(
-      _UnitData(number: _numCtrl.text.trim(), rentAmount: rent),
-    );
+    if (rent == null) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Enter a valid rent amount'))); return; }
+    Navigator.of(context).pop(_UnitData(number: _numCtrl.text.trim(), rentAmount: rent));
   }
-
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
@@ -737,31 +1012,16 @@ class _UnitDialogState extends State<_UnitDialog> {
         key: _formKey,
         child: SizedBox(
           width: 420,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextFormField(
-                controller: _numCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Unit Number/Name',
-                ),
-                validator: (v) => (v == null || v.trim().isEmpty) ? 'Unit number is required' : null,
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _rentCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Rent Amount',
-                ),
-                keyboardType: TextInputType.number,
-                validator: (v) => (v == null || v.trim().isEmpty) ? 'Rent amount is required' : null,
-              ),
-            ],
-          ),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            TextFormField(controller: _numCtrl, decoration: const InputDecoration(labelText: 'Unit Number/Name'),
+              validator: (v) => (v == null || v.trim().isEmpty) ? 'Unit number is required' : null),
+            const SizedBox(height: 12),
+            TextFormField(controller: _rentCtrl, decoration: const InputDecoration(labelText: 'Rent Amount'),
+              keyboardType: TextInputType.number, validator: (v) => (v == null || v.trim().isEmpty) ? 'Rent amount is required' : null),
+          ]),
         ),
       ),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+      actions: [ TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
         FilledButton(onPressed: _submit, child: const Text('Save')),
       ],
     );
@@ -771,57 +1031,32 @@ class _UnitDialogState extends State<_UnitDialog> {
 class _PaymentDialog extends StatefulWidget {
   final String? initialAmount;
   const _PaymentDialog({Key? key, this.initialAmount}) : super(key: key);
-
   @override
   State<_PaymentDialog> createState() => _PaymentDialogState();
 }
-
 class _PaymentDialogState extends State<_PaymentDialog> {
   final _formKey = GlobalKey<FormState>();
   final _amountCtrl = TextEditingController();
-
-  @override
-  void initState() {
-    super.initState();
-    _amountCtrl.text = widget.initialAmount ?? '';
-  }
-
-  @override
-  void dispose() {
-    _amountCtrl.dispose();
-    super.dispose();
-  }
-
+  @override void initState() { super.initState(); _amountCtrl.text = widget.initialAmount ?? ''; }
+  @override void dispose() { _amountCtrl.dispose(); super.dispose(); }
   void _submit() {
     if (!_formKey.currentState!.validate()) return;
     final amt = num.tryParse(_amountCtrl.text.trim());
-    if (amt == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Enter a valid amount')),
-      );
-      return;
-    }
+    if (amt == null) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Enter a valid amount'))); return; }
     Navigator.of(context).pop(amt);
   }
-
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
       title: const Text('Record Payment'),
       content: Form(
         key: _formKey,
-        child: SizedBox(
-          width: 360,
-          child: TextFormField(
-            controller: _amountCtrl,
-            decoration: const InputDecoration(labelText: 'Amount'),
-            keyboardType: TextInputType.number,
-            validator: (v) => (v == null || v.trim().isEmpty) ? 'Amount is required' : null,
-          ),
-        ),
+        child: SizedBox(width: 360, child: TextFormField(
+          controller: _amountCtrl, decoration: const InputDecoration(labelText: 'Amount'),
+          keyboardType: TextInputType.number, validator: (v) => (v == null || v.trim().isEmpty) ? 'Amount is required' : null,
+        )),
       ),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+      actions: [ TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
         FilledButton(onPressed: _submit, child: const Text('Save')),
       ],
     );
@@ -832,58 +1067,32 @@ class _AssignTenantDialog extends StatefulWidget {
   final String unitLabel;
   final String? initialRent;
   const _AssignTenantDialog({Key? key, required this.unitLabel, this.initialRent}) : super(key: key);
-
   @override
   State<_AssignTenantDialog> createState() => _AssignTenantDialogState();
 }
-
 class _AssignTenantDialogState extends State<_AssignTenantDialog> {
   final _formKey = GlobalKey<FormState>();
   final _nameCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
   final _emailCtrl = TextEditingController();
-  final _idCtrl = TextEditingController();       // optional national ID
+  final _idCtrl = TextEditingController();
   final _passwordCtrl = TextEditingController();
   final _rentCtrl = TextEditingController();
-
-  @override
-  void initState() {
-    super.initState();
-    _rentCtrl.text = widget.initialRent ?? '';
-  }
-
-  @override
-  void dispose() {
-    _nameCtrl.dispose();
-    _phoneCtrl.dispose();
-    _emailCtrl.dispose();
-    _idCtrl.dispose();
-    _passwordCtrl.dispose();
-    _rentCtrl.dispose();
-    super.dispose();
-  }
-
+  @override void initState() { super.initState(); _rentCtrl.text = widget.initialRent ?? ''; }
+  @override void dispose() { _nameCtrl.dispose(); _phoneCtrl.dispose(); _emailCtrl.dispose(); _idCtrl.dispose(); _passwordCtrl.dispose(); _rentCtrl.dispose(); super.dispose(); }
   void _submit() {
     if (!_formKey.currentState!.validate()) return;
     final rent = num.tryParse(_rentCtrl.text.trim());
-    if (rent == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Enter a valid rent amount')),
-      );
-      return;
-    }
-    Navigator.of(context).pop(
-      _AssignTenantData(
-        name: _nameCtrl.text.trim(),
-        phone: _phoneCtrl.text.trim(),
-        email: _emailCtrl.text.trim().isEmpty ? null : _emailCtrl.text.trim(),
-        password: _passwordCtrl.text.trim().isEmpty ? null : _passwordCtrl.text.trim(),
-        rentAmount: rent,
-        idNumber: _idCtrl.text.trim().isEmpty ? null : _idCtrl.text.trim(),
-      ),
-    );
+    if (rent == null) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Enter a valid rent amount'))); return; }
+    Navigator.of(context).pop(_AssignTenantData(
+      name: _nameCtrl.text.trim(),
+      phone: _phoneCtrl.text.trim(),
+      email: _emailCtrl.text.trim().isEmpty ? null : _emailCtrl.text.trim(),
+      password: _passwordCtrl.text.trim().isEmpty ? null : _passwordCtrl.text.trim(),
+      rentAmount: rent,
+      idNumber: _idCtrl.text.trim().isEmpty ? null : _idCtrl.text.trim(),
+    ));
   }
-
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
@@ -892,49 +1101,25 @@ class _AssignTenantDialogState extends State<_AssignTenantDialog> {
         key: _formKey,
         child: SizedBox(
           width: 460,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextFormField(
-                controller: _nameCtrl,
-                decoration: const InputDecoration(labelText: 'Tenant Name'),
-                validator: (v) => (v == null || v.trim().isEmpty) ? 'Name is required' : null,
-              ),
-              const SizedBox(height: 10),
-              TextFormField(
-                controller: _phoneCtrl,
-                decoration: const InputDecoration(labelText: 'Phone'),
-                validator: (v) => (v == null || v.trim().isEmpty) ? 'Phone is required' : null,
-              ),
-              const SizedBox(height: 10),
-              TextFormField(
-                controller: _emailCtrl,
-                decoration: const InputDecoration(labelText: 'Email (optional)'),
-              ),
-              const SizedBox(height: 10),
-              TextFormField(
-                controller: _idCtrl,
-                decoration: const InputDecoration(labelText: 'National ID (optional)'),
-              ),
-              const SizedBox(height: 10),
-              TextFormField(
-                controller: _passwordCtrl,
-                decoration: const InputDecoration(labelText: 'Password (optional)'),
-                obscureText: true,
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _rentCtrl,
-                decoration: const InputDecoration(labelText: 'Rent Amount'),
-                keyboardType: TextInputType.number,
-                validator: (v) => (v == null || v.trim().isEmpty) ? 'Rent amount is required' : null,
-              ),
-            ],
-          ),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            TextFormField(controller: _nameCtrl, decoration: const InputDecoration(labelText: 'Tenant Name'),
+              validator: (v) => (v == null || v.trim().isEmpty) ? 'Name is required' : null),
+            const SizedBox(height: 10),
+            TextFormField(controller: _phoneCtrl, decoration: const InputDecoration(labelText: 'Phone'),
+              validator: (v) => (v == null || v.trim().isEmpty) ? 'Phone is required' : null),
+            const SizedBox(height: 10),
+            TextFormField(controller: _emailCtrl, decoration: const InputDecoration(labelText: 'Email (optional)')),
+            const SizedBox(height: 10),
+            TextFormField(controller: _idCtrl, decoration: const InputDecoration(labelText: 'National ID (optional)')),
+            const SizedBox(height: 10),
+            TextFormField(controller: _passwordCtrl, decoration: const InputDecoration(labelText: 'Password (optional)'), obscureText: true),
+            const SizedBox(height: 12),
+            TextFormField(controller: _rentCtrl, decoration: const InputDecoration(labelText: 'Rent Amount'),
+              keyboardType: TextInputType.number, validator: (v) => (v == null || v.trim().isEmpty) ? 'Rent amount is required' : null),
+          ]),
         ),
       ),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+      actions: [ TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
         FilledButton(onPressed: _submit, child: const Text('Assign')),
       ],
     );
@@ -948,14 +1133,7 @@ class _AssignTenantData {
   final String? password;
   final num rentAmount;
   final String? idNumber;
-  _AssignTenantData({
-    required this.name,
-    required this.phone,
-    this.email,
-    this.password,
-    required this.rentAmount,
-    this.idNumber,
-  });
+  _AssignTenantData({required this.name, required this.phone, this.email, this.password, required this.rentAmount, this.idNumber});
 }
 
 class _UnitData {

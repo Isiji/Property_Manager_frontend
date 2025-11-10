@@ -42,9 +42,11 @@ class UnitService {
     // ignore: avoid_print
     print('[UnitService] POST $url payload=$payload');
 
-    final res = await http.post(url,
-        headers: {'Content-Type': 'application/json', ...headers},
-        body: jsonEncode(payload));
+    final res = await http.post(
+      url,
+      headers: {'Content-Type': 'application/json', ...headers},
+      body: jsonEncode(payload),
+    );
 
     // ignore: avoid_print
     print('[UnitService] ← ${res.statusCode} ${res.body}');
@@ -73,9 +75,11 @@ class UnitService {
     // ignore: avoid_print
     print('[UnitService] PUT $url payload=$payload');
 
-    final res = await http.put(url,
-        headers: {'Content-Type': 'application/json', ...headers},
-        body: jsonEncode(payload));
+    final res = await http.put(
+      url,
+      headers: {'Content-Type': 'application/json', ...headers},
+      body: jsonEncode(payload),
+    );
 
     // ignore: avoid_print
     print('[UnitService] ← ${res.statusCode} ${res.body}');
@@ -104,5 +108,31 @@ class UnitService {
     if (res.statusCode != 200 && res.statusCode != 204) {
       throw Exception('Failed to delete unit: ${res.statusCode} ${res.body}');
     }
+  }
+
+  /// NEW: Fetch the active tenant for a unit.
+  /// Returns null if 404 (no active tenant).
+  static Future<Map<String, dynamic>?> getUnitTenant(int unitId) async {
+    final headers = await TokenManager.authHeaders();
+    final url = Uri.parse('${AppConfig.apiBaseUrl}/units/$unitId/tenant');
+
+    // ignore: avoid_print
+    print('[UnitService] GET $url');
+
+    final res = await http.get(url, headers: {
+      'Content-Type': 'application/json',
+      ...headers,
+    });
+
+    // ignore: avoid_print
+    print('[UnitService] ← ${res.statusCode} ${res.body}');
+
+    if (res.statusCode == 200) {
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    }
+    if (res.statusCode == 404) {
+      return null;
+    }
+    throw Exception('Failed to get unit tenant: ${res.statusCode} ${res.body}');
   }
 }
