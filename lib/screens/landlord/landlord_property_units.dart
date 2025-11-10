@@ -1,10 +1,11 @@
 // Landlord property units screen
-// Frontend-only fixes:
-// - After loading detailed property, backfill missing tenant info per occupied unit via /units/{id}/tenant.
-// - Keep reminders, report, copy/call/WhatsApp actions.
-// - Avoid redundant update calls that used to trigger backend validation failures.
+// Fixes:
+// - Derive displayed occupancy from lease.active (truth wins over server 'status').
+// - Handle 409 “tenant already exists (id=XX)” by linking existing tenant to the unit.
+// - Keep tenant backfill, copy/call/WhatsApp, reminders, and collections summary.
 
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -68,12 +69,23 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
     return num.tryParse(v.toString()) ?? 0;
   }
 
+  bool _isLeaseActive(dynamic leaseActive) {
+    // backend sometimes returns 1/0 or true/false
+    return leaseActive == true || leaseActive == 1 || leaseActive == '1';
+  }
+
+  String _displayedStatus(Map<String, dynamic> unit) {
+    final leaseActive = unit['lease']?['active'];
+    if (_isLeaseActive(leaseActive)) return 'occupied';
+    return (unit['status'] ?? 'vacant').toString().toLowerCase();
+  }
+
   Map<String, num> _computeCollections() {
     num expected = 0, collected = 0;
     int paidCount = 0, unpaidCount = 0, occUnits = 0;
 
     for (final u in _units) {
-      final status = (u['status'] ?? 'vacant').toString().toLowerCase();
+      final status = _displayedStatus(u as Map<String, dynamic>);
       final rent = _parseNum(u['rent_amount']);
       final unitId = (u['id'] as num).toInt();
       final rs = _rentStatus[unitId];
@@ -137,11 +149,10 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
   }
 
   Future<void> _backfillTenants() async {
-    // For each occupied unit without tenant info, try /units/{id}/tenant
     final futures = <Future<void>>[];
     for (var i = 0; i < _units.length; i++) {
       final u = _units[i] as Map<String, dynamic>;
-      final status = (u['status'] ?? 'vacant').toString().toLowerCase();
+      final status = _displayedStatus(u);
       final hasTenant = u['tenant'] != null && (u['tenant']['phone']?.toString().trim().isNotEmpty == true);
       if (status == 'occupied' && !hasTenant) {
         final unitId = (u['id'] as num).toInt();
@@ -156,7 +167,6 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
     try {
       final tnt = await UnitService.getUnitTenant(unitId);
       if (tnt == null) return;
-      // Patch minimal tenant info into the unit row
       final u = Map<String, dynamic>.from(_units[index] as Map<String, dynamic>);
       u['tenant'] = {
         'id': tnt['id'],
@@ -271,9 +281,25 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
       debugPrint('[PropertyUnits] delete unit error: $e');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to delete unit: $e')),
+        SnackBar(content: Text('$e')),
       );
     }
+  }
+
+  // Parse: {"detail":"Tenant with phone 0723458751 already exists (id=13)"}
+  int? _extractTenantIdFrom409(Object err) {
+    final msg = err.toString();
+    final re = RegExp(r'id=(\d+)');
+    final m = re.firstMatch(msg);
+    if (m != null) return int.tryParse(m.group(1)!);
+    // sometimes backend may send JSON; try to decode once
+    try {
+      final json = jsonDecode(msg);
+      final detail = json['detail']?.toString() ?? '';
+      final m2 = re.firstMatch(detail);
+      if (m2 != null) return int.tryParse(m2.group(1)!);
+    } catch (_) {}
+    return null;
   }
 
   Future<void> _assignTenant(Map<String, dynamic> unit) async {
@@ -290,6 +316,7 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
       final propertyId = _property?['id'] as int? ?? widget.propertyId;
       final unitId = unit['id'] as int;
 
+      // 1) Try create tenant
       final tenant = await TenantService.createTenant(
         name: data.name,
         phone: data.phone,
@@ -301,6 +328,7 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
       final tenantId = (tenant['id'] as num?)?.toInt();
       if (tenantId == null) throw Exception('Backend did not return tenant id');
 
+      // 2) Create lease
       final today = _todayDate();
       await LeaseService.createLease(
         tenantId: tenantId,
@@ -310,13 +338,40 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
         active: 1,
       );
 
-      // Just refresh; backend flips occupancy.
       await _loadDetailed();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Tenant assigned and lease created')),
       );
     } catch (e) {
+      // Handle duplicate tenant by linking existing one
+      final existingId = _extractTenantIdFrom409(e);
+      if (existingId != null) {
+        try {
+          final unitId = unit['id'] as int;
+          final today = _todayDate();
+          await LeaseService.createLease(
+            tenantId: existingId,
+            unitId: unitId,
+            rentAmount: data!.rentAmount,
+            startDate: today,
+            active: 1,
+          );
+          await _loadDetailed();
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Linked existing tenant (ID=$existingId) and created lease')),
+          );
+          return;
+        } catch (inner) {
+          debugPrint('[PropertyUnits] link existing tenant failed: $inner');
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Failed to link existing tenant: $inner')),
+          );
+          return;
+        }
+      }
       debugPrint('[PropertyUnits] assign tenant error: $e');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -532,8 +587,8 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
     final address = _property!['address'] ?? '';
     final code = _property!['property_code'] ?? '—';
     final total = _property!['total_units'] ?? _units.length;
-    final occupied = _property!['occupied_units'] ?? (_units.where((u) => (u['status'] ?? '') == 'occupied').length);
-    final vacant = _property!['vacant_units'] ?? (total - occupied);
+    final occupiedCount = _units.where((u) => _displayedStatus(u as Map<String, dynamic>) == 'occupied').length;
+    final vacant = total - occupiedCount;
 
     final summary = _computeCollections();
 
@@ -599,7 +654,7 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
                   crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
                     _InfoChip(icon: Icons.grid_view_rounded, label: 'Total', value: '$total'),
-                    _InfoChip(icon: Icons.person_pin_circle_rounded, label: 'Occupied', value: '$occupied'),
+                    _InfoChip(icon: Icons.person_pin_circle_rounded, label: 'Occupied', value: '$occupiedCount'),
                     _InfoChip(icon: Icons.meeting_room_rounded, label: 'Vacant', value: '$vacant'),
                     _CopyableChip(
                       icon: Icons.qr_code_2_rounded,
@@ -674,12 +729,13 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
                     DataColumn(label: Text('Actions')),
                   ],
                   rows: _units.map((u) {
-                    final unitId = (u['id'] as num).toInt();
-                    final status = (u['status'] ?? 'vacant').toString().toLowerCase();
-                    final rent = (u['rent_amount'] ?? '').toString();
+                    final unitMap = u as Map<String, dynamic>;
+                    final unitId = (unitMap['id'] as num).toInt();
+                    final status = _displayedStatus(unitMap);
+                    final rent = (unitMap['rent_amount'] ?? '').toString();
 
-                    final tenantName = (u['tenant']?['name'] ?? '—').toString();
-                    final tenantPhone = (u['tenant']?['phone'] ?? '—').toString();
+                    final tenantName = (unitMap['tenant']?['name'] ?? '—').toString();
+                    final tenantPhone = (unitMap['tenant']?['phone'] ?? '—').toString();
 
                     final rs = _rentStatus[unitId];
                     final paid = rs?['paid'] == true;
@@ -687,7 +743,7 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
 
                     return DataRow(
                       cells: [
-                        DataCell(Text(u['number']?.toString() ?? '—')),
+                        DataCell(Text(unitMap['number']?.toString() ?? '—')),
                         DataCell(Text(rent)),
                         DataCell(_statusChip(status, t)),
                         DataCell(_TenantCell(
@@ -710,22 +766,22 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
                               onSelected: (value) {
                                 switch (value) {
                                   case 'assign':
-                                    _assignTenant(u as Map<String, dynamic>);
+                                    _assignTenant(unitMap);
                                     break;
                                   case 'end_lease':
-                                    _endLease(u as Map<String, dynamic>);
+                                    _endLease(unitMap);
                                     break;
                                   case 'edit':
-                                    _editUnit(u as Map<String, dynamic>);
+                                    _editUnit(unitMap);
                                     break;
                                   case 'delete':
                                     _deleteUnit(unitId);
                                     break;
                                   case 'record':
-                                    _recordPayment(u as Map<String, dynamic>);
+                                    _recordPayment(unitMap);
                                     break;
                                   case 'remind':
-                                    _sendReminder(u as Map<String, dynamic>);
+                                    _sendReminder(unitMap);
                                     break;
                                 }
                               },
