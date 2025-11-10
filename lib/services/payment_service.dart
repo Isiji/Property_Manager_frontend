@@ -2,12 +2,13 @@
 // ignore_for_file: avoid_print
 import 'dart:convert';
 import 'dart:typed_data';
-import 'dart:html' as html; // <-- for Flutter web download
-
 import 'package:http/http.dart' as http;
 import 'package:property_manager_frontend/core/config.dart';
 import 'package:property_manager_frontend/utils/token_manager.dart';
 import 'package:property_manager_frontend/events/app_events.dart';
+// For web download
+// ignore: avoid_web_libraries_in_flutter
+import 'dart:html' as html;
 
 class PaymentService {
   static Map<String, String> _json(Map<String, String> h) => {
@@ -60,10 +61,14 @@ class PaymentService {
   }
 
   /// POST /payments/remind
-  static Future<Map<String, dynamic>> sendReminder({required int leaseId}) async {
+  /// Optional message for SMS/WhatsApp + in-app notification.
+  static Future<Map<String, dynamic>> sendReminder({
+    required int leaseId,
+    String? message,
+  }) async {
     final h = await TokenManager.authHeaders();
     final url = Uri.parse('${AppConfig.apiBaseUrl}/payments/remind');
-    final body = {'lease_id': leaseId};
+    final body = {'lease_id': leaseId, if (message != null && message.isNotEmpty) 'message': message};
     print('[PaymentService] POST $url body=$body');
     final r = await http.post(url, headers: _json(h), body: jsonEncode(body));
     print('[PaymentService] ← ${r.statusCode} ${r.body}');
@@ -73,6 +78,30 @@ class PaymentService {
       return (b is Map) ? b.cast<String, dynamic>() : <String, dynamic>{};
     }
     throw Exception('Reminder failed: ${r.statusCode} ${r.body}');
+  }
+
+  /// POST /payments/remind/bulk
+  /// Sends to all UNPAID for property & period; optional message.
+  static Future<void> sendRemindersBulk({
+    required int propertyId,
+    required String period,
+    String? message,
+  }) async {
+    final h = await TokenManager.authHeaders();
+    final url = Uri.parse('${AppConfig.apiBaseUrl}/payments/remind/bulk');
+    final body = {
+      'property_id': propertyId,
+      'period': period,
+      if (message != null && message.isNotEmpty) 'message': message,
+    };
+    print('[PaymentService] POST $url body=$body');
+    final r = await http.post(url, headers: _json(h), body: jsonEncode(body));
+    print('[PaymentService] ← ${r.statusCode} ${r.body}');
+    if (r.statusCode == 200) {
+      AppEvents.I.paymentActivity.add(null);
+      return;
+    }
+    throw Exception('Bulk reminders failed: ${r.statusCode} ${r.body}');
   }
 
   /// POST /payments/mpesa/initiate
@@ -100,11 +129,9 @@ class PaymentService {
   }
 
   // ---------- Receipts ----------
-
   static String receiptUrl(int paymentId) =>
-      '${AppConfig.apiBaseUrl}/payments/receipt/$paymentId.pdf';
+      '${AppConfig.apiBaseUrl}/payments/mpesa/receipt/$paymentId.pdf';
 
-  /// Fetches the PDF and triggers a browser download (Flutter web).
   static Future<void> downloadReceiptPdf(int paymentId) async {
     final h = await TokenManager.authHeaders();
     final url = Uri.parse(receiptUrl(paymentId));

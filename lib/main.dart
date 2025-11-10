@@ -16,6 +16,7 @@ import 'package:property_manager_frontend/screens/landlord/landlord_overview.dar
 import 'package:property_manager_frontend/theme/app_theme.dart';
 import 'package:property_manager_frontend/providers/theme_provider.dart';
 import 'package:property_manager_frontend/utils/token_manager.dart';
+import 'package:property_manager_frontend/screens/lease/lease_view.dart';
 
 void main() {
   runApp(
@@ -64,7 +65,7 @@ class PropSmartApp extends StatelessWidget {
         '/tenant_home': (_) => const TenantHome(),
         // ✅ One common dashboard shell
         '/dashboard': (_) => const DashboardShell(),
-
+        '/lease_view': (ctx) => const LeaseViewScreen(),
         // ✅ Route aliases (old routes still work)
         '/landlord_dashboard': (_) => const DashboardShell(),
         '/manager_dashboard': (_) => const DashboardShell(),
