@@ -1,11 +1,12 @@
 // lib/services/lease_service.dart
+// Handles single-or-null response from /leases/me
+
 // ignore_for_file: avoid_print
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import 'package:property_manager_frontend/core/config.dart';
 import 'package:property_manager_frontend/utils/token_manager.dart';
-// For web download
 // ignore: avoid_web_libraries_in_flutter
 import 'dart:html' as html;
 
@@ -45,8 +46,6 @@ class LeaseService {
     throw Exception('Create lease failed: ${r.statusCode} ${r.body}');
   }
 
-  /// Some backends are picky about trailing slashes.
-  /// We try `/leases/{id}/end` then `/leases/{id}/end/`.
   static Future<void> endLease({required int leaseId, required String endDate}) async {
     final h = await _auth();
     Future<http.Response> _post(Uri u) =>
@@ -81,15 +80,20 @@ class LeaseService {
     throw Exception('Get lease failed: ${r.statusCode} ${r.body}');
   }
 
+  /// Backend returns a single lease object or null.
+  /// We normalize to `List` for backward compatibility.
   static Future<List<dynamic>> listLeasesForCurrentUser() async {
     final h = await _auth();
     final url = Uri.parse('${AppConfig.apiBaseUrl}/leases/me');
     print('[LeaseService] GET $url');
     final r = await http.get(url, headers: _json(h));
-    print('[LeaseService] ← ${r.statusCode}');
+    print('[LeaseService] ← ${r.statusCode} ${r.body}');
     if (r.statusCode == 200) {
       final b = jsonDecode(r.body);
-      return (b is List) ? b : const [];
+      if (b == null) return const [];
+      if (b is List) return b; // just in case
+      if (b is Map) return [b]; // single lease -> list of one
+      return const [];
     }
     throw Exception('List my leases failed: ${r.statusCode} ${r.body}');
   }
@@ -130,13 +134,9 @@ class LeaseService {
     throw Exception('Activate lease failed: ${r.statusCode} ${r.body}');
   }
 
-  /// Tries `/leases/{id}.pdf` first (with Accept header), then `/leases/{id}/pdf`.
   static Future<void> downloadLeasePdf(int leaseId) async {
     final h = await _auth();
-    final hPdf = {
-      ...h,
-      'Accept': 'application/pdf',
-    };
+    final hPdf = {...h, 'Accept': 'application/pdf'};
     final u1 = Uri.parse('${AppConfig.apiBaseUrl}/leases/$leaseId.pdf');
     final u2 = Uri.parse('${AppConfig.apiBaseUrl}/leases/$leaseId/pdf');
 
@@ -169,7 +169,6 @@ class LeaseService {
         return;
       }
     }
-
     throw Exception('Lease PDF failed: ${r.statusCode} ${r.body}');
   }
 }

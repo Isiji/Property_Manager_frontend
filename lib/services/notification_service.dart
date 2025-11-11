@@ -1,5 +1,5 @@
 // lib/services/notification_service.dart
-// Basic notifications fetch + unread count + mark-all-read.
+// Token-aware notifications: list current user's notifications, unread count, mark-all-read.
 
 import 'dart:convert';
 import 'package:http/http.dart' as http;
@@ -12,9 +12,10 @@ class NotificationService {
         ...h,
       };
 
-  static Future<List<dynamic>> list({int limit = 50}) async {
+  /// List notifications for the CURRENT token user
+  static Future<List<dynamic>> listMe({int limit = 50}) async {
     final h = await TokenManager.authHeaders();
-    final url = Uri.parse('${AppConfig.apiBaseUrl}/notifications')
+    final url = Uri.parse('${AppConfig.apiBaseUrl}/notifications/me')
         .replace(queryParameters: {'limit': '$limit'});
     final r = await http.get(url, headers: _json(h));
     if (r.statusCode == 200) {
@@ -32,7 +33,7 @@ class NotificationService {
       final b = jsonDecode(r.body);
       return (b is Map && b['count'] is num) ? (b['count'] as num).toInt() : 0;
     }
-    return 0;
+    throw Exception('unread_count failed: ${r.statusCode} ${r.body}');
   }
 
   static Future<void> markAllRead() async {

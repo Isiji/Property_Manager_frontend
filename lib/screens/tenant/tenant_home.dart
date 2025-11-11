@@ -1,6 +1,4 @@
 // lib/screens/tenant/tenant_home.dart
-// Tenant portal with tabs: Dashboard, Payments, Maintenance, Profile.
-// Polished: payment acknowledgement, receipt download, slash-safe behavior.
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -10,6 +8,7 @@ import 'package:property_manager_frontend/services/payment_service.dart';
 import 'package:property_manager_frontend/utils/token_manager.dart';
 import 'package:property_manager_frontend/services/auth_service.dart';
 import 'package:property_manager_frontend/services/lease_service.dart';
+import 'package:property_manager_frontend/widgets/notification_bell.dart';
 
 class TenantHome extends StatefulWidget {
   const TenantHome({super.key});
@@ -62,22 +61,18 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
       final role = await TokenManager.currentRole();
       if (role != 'tenant') {
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Please log in as a tenant.')),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please log in as a tenant.')));
         Navigator.of(context).pushNamedAndRemoveUntil('/login', (_) => false);
         return;
       }
 
       try {
         final dash = await TenantPortalService.getOverview();
-        _dashboard = dash is Map ? dash.cast<String, dynamic>() : <String, dynamic>{};
+        _dashboard = (dash is Map) ? dash.cast<String, dynamic>() : <String, dynamic>{};
       } catch (e) {
         _dashboard = const <String, dynamic>{};
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Overview unavailable: $e')),
-          );
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Overview unavailable: $e')));
         }
       }
 
@@ -104,14 +99,12 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
 
       try {
         final profile = await TenantPortalService.getProfile();
-        final p = profile is Map ? profile.cast<String, dynamic>() : <String, dynamic>{};
+        final p = (profile is Map) ? profile.cast<String, dynamic>() : <String, dynamic>{};
         _nameCtrl.text = (p['name'] ?? '').toString();
         _phoneCtrl.text = (p['phone'] ?? '').toString();
         _emailCtrl.text = (p['email'] ?? '').toString();
         _idCtrl.text = (p['id_number'] ?? '').toString();
-      } catch (_) {
-        // keep empty
-      }
+      } catch (_) {}
 
       if (mounted) setState(() {});
     } finally {
@@ -120,7 +113,6 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
   }
 
   Future<void> _submitMaintenance() async {
-    final titleCtrl = TextEditingController();
     final descCtrl = TextEditingController();
     final formKey = GlobalKey<FormState>();
 
@@ -132,21 +124,14 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
           key: formKey,
           child: SizedBox(
             width: 420,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextFormField(
-                  controller: titleCtrl,
-                  decoration: const InputDecoration(labelText: 'Title'),
-                  validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
-                ),
-                const SizedBox(height: 10),
-                TextFormField(
-                  controller: descCtrl,
-                  decoration: const InputDecoration(labelText: 'Description'),
-                  maxLines: 3,
-                ),
-              ],
+            child: TextFormField(
+              controller: descCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Describe the issue',
+                hintText: 'e.g. broken kitchen pipe',
+              ),
+              maxLines: 4,
+              validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
             ),
           ),
         ),
@@ -156,22 +141,15 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
             onPressed: () async {
               if (!formKey.currentState!.validate()) return;
               try {
-                await TenantPortalService.createMaintenance(
-                  title: titleCtrl.text.trim(),
-                  description: descCtrl.text.trim().isEmpty ? null : descCtrl.text.trim(),
-                );
+                await TenantPortalService.createMaintenance(description: descCtrl.text.trim());
                 if (!mounted) return;
                 Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Request submitted')),
-                );
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Request submitted')));
                 final m = await TenantPortalService.getMaintenance();
                 setState(() => _tickets = m is List ? m : const []);
               } catch (e) {
                 if (!mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Submit failed: $e')),
-                );
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Submit failed: $e')));
               }
             },
             child: const Text('Submit'),
@@ -195,14 +173,10 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
       );
 
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Profile updated')),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Profile updated')));
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Update failed: $e')),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Update failed: $e')));
     }
   }
 
@@ -224,11 +198,15 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
             Tab(text: 'Profile', icon: Icon(Icons.person_rounded)),
           ],
         ),
-        actions: [
-          IconButton(onPressed: _loadAll, icon: const Icon(Icons.refresh_rounded), tooltip: 'Refresh'),
-          IconButton(onPressed: _logout, icon: const Icon(Icons.logout_rounded), tooltip: 'Logout'),
-          const SizedBox(width: 8),
+        actions: const [
+          NotificationBell(), // 🔔 unread badge + inbox
+          SizedBox(width: 8),
         ],
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _loadAll,
+        icon: const Icon(Icons.refresh_rounded),
+        label: const Text('Refresh'),
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
@@ -245,9 +223,7 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
   }
 
   // ---------- helpers ----------
-  Map<String, dynamic> _asMap(dynamic v) =>
-      v is Map ? v.cast<String, dynamic>() : <String, dynamic>{};
-
+  Map<String, dynamic> _asMap(dynamic v) => v is Map ? v.cast<String, dynamic>() : <String, dynamic>{};
   bool _isTrue(dynamic v) => v == true || v?.toString().toLowerCase() == 'true';
 
   // ---------- tabs ----------
@@ -459,11 +435,11 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
         separatorBuilder: (_, __) => const SizedBox(height: 10),
         itemBuilder: (_, i) {
           final p = items[i];
-          final period = (p['period'] ?? '').toString();          // YYYY-MM
+          final period = (p['period'] ?? '').toString(); // YYYY-MM
           final amount = (p['amount'] ?? '').toString();
           final date = (p['paid_date'] ?? '').toString();
           final ref = (p['reference'] ?? '').toString();
-          final status = (p['status'] ?? '').toString().toLowerCase();
+          final status = (p['status'] ?? 'paid').toString().toLowerCase();
           final id = (p['id'] as num?)?.toInt();
 
           final isPaid = status == 'paid';
@@ -527,9 +503,7 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
                           ),
                         ],
                       ),
-
                       const SizedBox(height: 6),
-
                       Wrap(
                         spacing: 12,
                         runSpacing: 4,
@@ -539,7 +513,6 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
                           _meta(t, Icons.tag_rounded, 'Period: $period'),
                         ],
                       ),
-
                       if (isPaid) ...[
                         const SizedBox(height: 10),
                         Text(
@@ -550,9 +523,7 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
                           ),
                         ),
                       ],
-
                       const SizedBox(height: 12),
-
                       Row(
                         children: [
                           if (isPaid && id != null)
@@ -639,13 +610,13 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
             child: Column(
               children: _tickets.map<Widget>((it) {
                 final m = (it is Map) ? it.cast<String, dynamic>() : <String, dynamic>{};
-                final title = (m['title'] ?? 'Request').toString();
+                final description = (m['description'] ?? 'Maintenance request').toString();
                 final status = (m['status'] ?? 'open').toString();
                 final created = (m['created_at'] ?? '').toString();
                 final chip = Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                   decoration: BoxDecoration(
-                    color: status == 'closed'
+                    color: status == 'resolved' || status == 'closed'
                         ? t.colorScheme.tertiaryContainer
                         : t.colorScheme.primaryContainer,
                     borderRadius: BorderRadius.circular(999),
@@ -653,7 +624,7 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
                   child: Text(
                     status.toUpperCase(),
                     style: t.textTheme.labelSmall?.copyWith(
-                      color: status == 'closed'
+                      color: status == 'resolved' || status == 'closed'
                           ? t.colorScheme.onTertiaryContainer
                           : t.colorScheme.onPrimaryContainer,
                       fontWeight: FontWeight.w800,
@@ -662,10 +633,9 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
                 );
                 return ListTile(
                   leading: const Icon(Icons.build_rounded),
-                  title: Text(title),
+                  title: Text(description, maxLines: 2, overflow: TextOverflow.ellipsis),
                   subtitle: Text(created),
                   trailing: chip,
-                  onTap: () {},
                 );
               }).toList(),
             ),
