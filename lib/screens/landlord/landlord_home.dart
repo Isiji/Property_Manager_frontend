@@ -1,6 +1,9 @@
 // ignore_for_file: avoid_print, use_build_context_synchronously
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:property_manager_frontend/services/property_service.dart';
 import 'package:property_manager_frontend/utils/token_manager.dart';
@@ -26,6 +29,11 @@ class _LandlordHomeState extends State<LandlordHome> {
   final _editAddrCtrl = TextEditingController();
 
   String _search = '';
+
+  /// Cache for unit counts per property id
+  final Map<int, int> _unitCounts = {};
+  /// Tracks in-flight fetches so we don’t duplicate calls
+  final Map<int, Future<void>> _unitCountLoading = {};
 
   @override
   void initState() {
@@ -78,6 +86,7 @@ class _LandlordHomeState extends State<LandlordHome> {
       final data = await PropertyService.getPropertiesByLandlord(_landlordId!);
       print('✅ properties loaded: ${data.length}');
       setState(() => _properties = data);
+      // Don’t spam the backend: unit counts are fetched lazily per card.
     } catch (e) {
       print('💥 load properties error: $e');
       if (!mounted) return;
@@ -213,6 +222,10 @@ class _LandlordHomeState extends State<LandlordHome> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Property deleted')),
       );
+      setState(() {
+        _unitCounts.remove(id);
+        _unitCountLoading.remove(id);
+      });
       await _loadProperties();
     } catch (e) {
       print('💥 delete error: $e');
@@ -234,40 +247,82 @@ class _LandlordHomeState extends State<LandlordHome> {
     }).toList();
   }
 
+  Future<void> _copy(String label, String text) async {
+    await Clipboard.setData(ClipboardData(text: text));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$label copied')));
+  }
+
+  /// Lazy-load unit counts from /properties/{id}/with-units-detailed
+  void _ensureUnitCount(int propertyId) {
+    if (_unitCounts.containsKey(propertyId) || _unitCountLoading.containsKey(propertyId)) return;
+    final fut = _loadUnitCount(propertyId);
+    _unitCountLoading[propertyId] = fut;
+    fut.whenComplete(() {
+      _unitCountLoading.remove(propertyId);
+    });
+  }
+
+  Future<void> _loadUnitCount(int propertyId) async {
+    try {
+      final detail = await PropertyService.getPropertyWithUnitsDetailed(propertyId);
+      final total = (detail['total_units'] as num?)?.toInt() ?? (detail['units'] as List?)?.length ?? 0;
+      if (!mounted) return;
+      setState(() => _unitCounts[propertyId] = total);
+    } catch (e) {
+      print('[unit-count] failed for $propertyId: $e');
+      // Leave it unset; card will show “—”
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final list = _filtered;
 
-    return ListView(
-      children: [
-        _addPropertyPanel(),
-        _searchBar(),
-        if (_loading)
-          const Padding(
-            padding: EdgeInsets.all(32),
-            child: Center(child: CircularProgressIndicator()),
-          )
-        else if (list.isEmpty)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 40),
-            child: Column(
-              children: [
-                const Icon(LucideIcons.folderOpen, size: 56, color: Colors.grey),
-                const SizedBox(height: 12),
-                const Text('No properties found.'),
-                const SizedBox(height: 12),
-                TextButton.icon(
-                  onPressed: _loadProperties,
-                  icon: const Icon(LucideIcons.refreshCcw),
-                  label: const Text('Reload'),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth;
+        final isNarrow = width < 560;
+
+        return ListView(
+          padding: const EdgeInsets.only(bottom: 24),
+          children: [
+            _addPropertyPanel(isNarrow: isNarrow),
+            _searchBar(),
+            if (_loading)
+              const Padding(
+                padding: EdgeInsets.all(32),
+                child: Center(child: CircularProgressIndicator()),
+              )
+            else if (list.isEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 40),
+                child: Column(
+                  children: [
+                    const Icon(LucideIcons.folderOpen, size: 56, color: Colors.grey),
+                    const SizedBox(height: 12),
+                    const Text('No properties found.'),
+                    const SizedBox(height: 12),
+                    TextButton.icon(
+                      onPressed: _loadProperties,
+                      icon: const Icon(LucideIcons.refreshCcw),
+                      label: const Text('Reload'),
+                    ),
+                  ],
                 ),
-              ],
-            ),
-          )
-        else
-          ...list.map((p) => _propertyCard(p as Map<String, dynamic>)).toList(),
-        const SizedBox(height: 32),
-      ],
+              )
+            else
+              // Use a responsive grid for cards; falls back to 1 col on phones
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: _PropertyGrid(
+                  items: list.cast<Map<String, dynamic>>(),
+                  cardBuilder: (p) => _propertyCard(p),
+                ),
+              ),
+          ],
+        );
+      },
     );
   }
 
@@ -287,7 +342,7 @@ class _LandlordHomeState extends State<LandlordHome> {
     );
   }
 
-  Widget _addPropertyPanel() {
+  Widget _addPropertyPanel({required bool isNarrow}) {
     return Card(
       margin: const EdgeInsets.fromLTRB(16, 12, 16, 8),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
@@ -305,28 +360,61 @@ class _LandlordHomeState extends State<LandlordHome> {
                 ],
               ),
               const SizedBox(height: 12),
-              TextFormField(
-                controller: _nameCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Property name',
-                  hintText: 'e.g. Palm Heights',
-                  prefixIcon: Icon(LucideIcons.building2),
+
+              if (isNarrow)
+                Column(
+                  children: [
+                    TextFormField(
+                      controller: _nameCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'Property name',
+                        hintText: 'e.g. Palm Heights',
+                        prefixIcon: Icon(LucideIcons.building2),
+                      ),
+                      validator: (v) => (v == null || v.trim().isEmpty) ? 'Name is required' : null,
+                    ),
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      controller: _addrCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'Address',
+                        hintText: 'e.g. 45 Sunset Blvd',
+                        prefixIcon: Icon(LucideIcons.mapPin),
+                      ),
+                      validator: (v) => (v == null || v.trim().isEmpty) ? 'Address is required' : null,
+                    ),
+                  ],
+                )
+              else
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextFormField(
+                        controller: _nameCtrl,
+                        decoration: const InputDecoration(
+                          labelText: 'Property name',
+                          hintText: 'e.g. Palm Heights',
+                          prefixIcon: Icon(LucideIcons.building2),
+                        ),
+                        validator: (v) => (v == null || v.trim().isEmpty) ? 'Name is required' : null,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: TextFormField(
+                        controller: _addrCtrl,
+                        decoration: const InputDecoration(
+                          labelText: 'Address',
+                          hintText: 'e.g. 45 Sunset Blvd',
+                          prefixIcon: Icon(LucideIcons.mapPin),
+                        ),
+                        validator: (v) => (v == null || v.trim().isEmpty) ? 'Address is required' : null,
+                      ),
+                    ),
+                  ],
                 ),
-                validator: (v) =>
-                    (v == null || v.trim().isEmpty) ? 'Name is required' : null,
-              ),
               const SizedBox(height: 12),
-              TextFormField(
-                controller: _addrCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Address',
-                  hintText: 'e.g. 45 Sunset Blvd',
-                  prefixIcon: Icon(LucideIcons.mapPin),
-                ),
-                validator: (v) =>
-                    (v == null || v.trim().isEmpty) ? 'Address is required' : null,
-              ),
-              const SizedBox(height: 12),
+
               Align(
                 alignment: Alignment.centerRight,
                 child: ElevatedButton.icon(
@@ -348,101 +436,228 @@ class _LandlordHomeState extends State<LandlordHome> {
     final addr = p['address'] ?? '';
     final code = p['property_code'] ?? '—';
 
-    return Card(
-      margin: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-      elevation: 1.5,
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Avatar
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.12),
-              ),
-              child: Icon(
-                LucideIcons.home,
-                color: Theme.of(context).colorScheme.primary,
-              ),
-            ),
-            const SizedBox(width: 14),
+    // Kick off unit count fetch (lazy) without doing setState in build immediately.
+    if (!_unitCounts.containsKey(id) && !_unitCountLoading.containsKey(id)) {
+      // Schedule so we don't call setState synchronously during build.
+      Future.microtask(() => _ensureUnitCount(id));
+    }
 
-            // Texts
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(name,
-                      style: Theme.of(context).textTheme.titleMedium,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis),
-                  const SizedBox(height: 4),
-                  Text(addr,
-                      style: Theme.of(context).textTheme.bodyMedium,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis),
-                  const SizedBox(height: 8),
-                  Row(
+    return LayoutBuilder(
+      builder: (context, c) {
+        final t = Theme.of(context);
+        final isNarrow = c.maxWidth < 560;
+
+        final avatar = Container(
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: t.colorScheme.primary.withValues(alpha: 0.12),
+          ),
+          child: Icon(LucideIcons.home, color: t.colorScheme.primary),
+        );
+
+        final title = Text(
+          name,
+          style: t.textTheme.titleMedium,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        );
+
+        final subtitle = Text(
+          addr,
+          style: t.textTheme.bodyMedium,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        );
+
+        final unitCount = _unitCounts[id];
+        final unitBadge = Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            color: t.colorScheme.surface,
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: t.dividerColor.withOpacity(.25)),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(LucideIcons.grid, size: 16),
+              const SizedBox(width: 6),
+              Text(
+                unitCount == null ? 'Units: —' : 'Units: $unitCount',
+                style: t.textTheme.labelMedium,
+              ),
+            ],
+          ),
+        );
+
+        final codeChip = Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            color: t.colorScheme.surface,
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: t.dividerColor.withOpacity(.25)),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(LucideIcons.keyRound, size: 16),
+              const SizedBox(width: 6),
+              Text('Code: $code', style: t.textTheme.labelMedium, overflow: TextOverflow.ellipsis),
+              const SizedBox(width: 6),
+              InkWell(
+                onTap: code.toString().trim().isEmpty ? null : () => _copy('Property code', code.toString()),
+                borderRadius: BorderRadius.circular(999),
+                child: const Padding(
+                  padding: EdgeInsets.all(4.0),
+                  child: Icon(Icons.copy_rounded, size: 16),
+                ),
+              ),
+            ],
+          ),
+        );
+
+        final chips = Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [unitBadge, codeChip],
+        );
+
+        final actions = Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            OutlinedButton.icon(
+              icon: const Icon(LucideIcons.grid, size: 18),
+              label: const Text('View Units'),
+              onPressed: () {
+                print('🧭 Open units for propertyId=$id');
+                Navigator.of(context).pushNamed(
+                  '/landlord_property_units',
+                  arguments: {'propertyId': id},
+                );
+              },
+            ),
+            OutlinedButton.icon(
+              icon: const Icon(LucideIcons.pencil, size: 18),
+              label: const Text('Edit'),
+              onPressed: () => _openEdit(p),
+            ),
+            FilledButton.icon(
+              icon: const Icon(LucideIcons.trash2, size: 18),
+              style: FilledButton.styleFrom(backgroundColor: Colors.red),
+              label: const Text('Delete'),
+              onPressed: () => _deleteProperty(id),
+            ),
+          ],
+        );
+
+        // Card layout switches to a stacked Column on narrow widths (phones)
+        return Card(
+          margin: const EdgeInsets.fromLTRB(4, 8, 4, 8),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          elevation: 1.5,
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: isNarrow
+                ? Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Icon(LucideIcons.keyRound, size: 16),
-                      const SizedBox(width: 6),
-                      SelectableText(
-                        "Code: $code",
-                        style: Theme.of(context)
-                            .textTheme
-                            .labelMedium
-                            ?.copyWith(color: Colors.grey[700]),
+                      Row(
+                        children: [
+                          avatar,
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                title,
+                                const SizedBox(height: 4),
+                                subtitle,
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      chips,
+                      const SizedBox(height: 10),
+                      actions,
+                    ],
+                  )
+                : Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      avatar,
+                      const SizedBox(width: 14),
+                      // Texts + chips
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            title,
+                            const SizedBox(height: 4),
+                            subtitle,
+                            const SizedBox(height: 8),
+                            chips,
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      // Actions (wrap so it never overflows)
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 360),
+                        child: actions,
                       ),
                     ],
                   ),
-                ],
-              ),
-            ),
+          ),
+        );
+      },
+    );
+  }
+}
 
-            const SizedBox(width: 8),
+/// A tiny responsive grid that adapts to width.
+/// 1 column on phones, 2 on small tablets, 3 on large.
+class _PropertyGrid extends StatelessWidget {
+  final List<Map<String, dynamic>> items;
+  final Widget Function(Map<String, dynamic>) cardBuilder;
 
-            // Actions (never overflow)
-            Flexible(
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Wrap(
-                  spacing: 8,
-                  children: [
-                    OutlinedButton.icon(
-                      icon: const Icon(LucideIcons.grid, size: 18),
-                      label: const Text('View Units'),
-                      onPressed: () {
-                        print('🧭 Open units for propertyId=$id');
-                        // IMPORTANT: your route in main.dart expects a Map with propertyId
-                        Navigator.of(context).pushNamed(
-                          '/landlord_property_units',
-                          arguments: {'propertyId': id},
-                        );
-                      },
-                    ),
-                    OutlinedButton.icon(
-                      icon: const Icon(LucideIcons.pencil, size: 18),
-                      label: const Text('Edit'),
-                      onPressed: () => _openEdit(p),
-                    ),
-                    FilledButton.icon(
-                      icon: const Icon(LucideIcons.trash2, size: 18),
-                      style: FilledButton.styleFrom(backgroundColor: Colors.red),
-                      label: const Text('Delete'),
-                      onPressed: () => _deleteProperty(id),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
+  const _PropertyGrid({required this.items, required this.cardBuilder});
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (ctx, c) {
+        final width = c.maxWidth;
+        final gutter = width < 480 ? 8.0 : 12.0;
+        final minCardWidth = width < 480 ? 320.0 : 360.0;
+        final cols = (width ~/ (minCardWidth + gutter)).clamp(1, 3);
+
+        if (cols == 1) {
+          // Simple ListView-like column for phones
+          return Column(
+            children: [
+              for (final p in items) cardBuilder(p),
+            ],
+          );
+        }
+
+        return GridView.builder(
+          itemCount: items.length,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: cols,
+            crossAxisSpacing: gutter,
+            mainAxisSpacing: gutter,
+            childAspectRatio: 1.8, // wide-ish cards
+          ),
+          itemBuilder: (context, i) => cardBuilder(items[i]),
+        );
+      },
     );
   }
 }
