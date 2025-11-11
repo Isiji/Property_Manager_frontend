@@ -594,7 +594,6 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
           ),
           const SizedBox(width: 8),
         ],
-        
       ),
       body: LayoutBuilder(
         builder: (context, constraints) {

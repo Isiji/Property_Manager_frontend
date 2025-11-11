@@ -49,7 +49,9 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
   }
 
   Future<void> _logout() async {
-    await AuthService.logout();
+    try {
+      await AuthService.logout();
+    } catch (_) {}
     if (!mounted) return;
     Navigator.of(context).pushNamedAndRemoveUntil('/login', (_) => false);
   }
@@ -198,9 +200,16 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
             Tab(text: 'Profile', icon: Icon(Icons.person_rounded)),
           ],
         ),
-        actions: const [
-          NotificationBell(), // 🔔 unread badge + inbox
-          SizedBox(width: 8),
+        actions: [
+          const NotificationBell(), // 🔔 unread badge + inbox
+          const SizedBox(width: 4),
+          const VerticalDivider(width: 1, thickness: 1),
+          IconButton(
+            tooltip: 'Logout',
+            icon: const Icon(Icons.logout_rounded),
+            onPressed: _logout,
+          ),
+          const SizedBox(width: 8),
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(

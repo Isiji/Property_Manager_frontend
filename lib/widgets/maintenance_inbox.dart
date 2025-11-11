@@ -1,16 +1,18 @@
-// lib/widgets/notifications_sheet.dart
+// lib/widgets/maintenance_inbox.dart
+// Bottom-sheet inbox for maintenance-related notifications (landlord/manager).
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:property_manager_frontend/services/notification_service.dart';
 
-class NotificationsSheet extends StatefulWidget {
-  const NotificationsSheet({super.key});
+class MaintenanceInboxSheet extends StatefulWidget {
+  const MaintenanceInboxSheet({super.key});
 
   @override
-  State<NotificationsSheet> createState() => _NotificationsSheetState();
+  State<MaintenanceInboxSheet> createState() => _MaintenanceInboxSheetState();
 }
 
-class _NotificationsSheetState extends State<NotificationsSheet> {
+class _MaintenanceInboxSheetState extends State<MaintenanceInboxSheet> {
   bool _loading = true;
   List<Map<String, dynamic>> _items = const [];
 
@@ -23,13 +25,24 @@ class _NotificationsSheetState extends State<NotificationsSheet> {
   Future<void> _load() async {
     try {
       setState(() => _loading = true);
-      final list = await NotificationService.list(limit: 100);
-      setState(() => _items = list);
+      // Uses listMe(), which resolves current user and calls /notifications/{id}
+      final list = await NotificationService.listMe(limit: 100);
+      // keep only maintenance-ish items
+      final maint = list.where((e) {
+        final m = e.map((k, v) => MapEntry(k.toString(), v));
+        final title = (m['title'] ?? '').toString().toLowerCase();
+        final msg = (m['message'] ?? '').toString().toLowerCase();
+        return title.contains('maintenance') ||
+               title.contains('request') ||
+               msg.contains('maintenance') ||
+               msg.contains('request');
+      }).toList();
+      setState(() => _items = maint);
     } catch (e) {
       setState(() => _items = const []);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to load: $e')),
+        SnackBar(content: Text('Failed to load inbox: $e')),
       );
     } finally {
       if (mounted) setState(() => _loading = false);
@@ -46,9 +59,10 @@ class _NotificationsSheetState extends State<NotificationsSheet> {
           mainAxisSize: MainAxisSize.min,
           children: [
             Row(children: [
-              const Icon(Icons.notifications_rounded),
+              const Icon(Icons.build_rounded),
               const SizedBox(width: 8),
-              Text('Notifications', style: t.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
+              Text('Maintenance Inbox',
+                  style: t.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
               const Spacer(),
               IconButton(
                 tooltip: 'Refresh',
@@ -65,7 +79,7 @@ class _NotificationsSheetState extends State<NotificationsSheet> {
             else if (_items.isEmpty)
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 40),
-                child: Text('No notifications yet.',
+                child: Text('No maintenance notifications yet.',
                     style: t.textTheme.bodyMedium?.copyWith(
                       color: t.colorScheme.onSurfaceVariant,
                     )),
@@ -78,16 +92,20 @@ class _NotificationsSheetState extends State<NotificationsSheet> {
                   separatorBuilder: (_, __) => const Divider(height: 1),
                   itemBuilder: (_, i) {
                     final m = _items[i];
-                    final title = (m['title'] ?? 'Notification').toString();
+                    final title = (m['title'] ?? 'Maintenance').toString();
                     final message = (m['message'] ?? '').toString();
                     final created = (m['created_at'] ?? '').toString();
                     final dt = DateTime.tryParse(created);
                     final ts = dt != null ? DateFormat.yMMMd().add_jm().format(dt) : created;
 
                     return ListTile(
-                      leading: const Icon(Icons.notifications_active_rounded),
+                      leading: const Icon(Icons.report_problem_rounded),
                       title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
                       subtitle: Text('$message\n$ts', maxLines: 3, overflow: TextOverflow.ellipsis),
+                      trailing: const Icon(Icons.chevron_right_rounded),
+                      onTap: () {
+                        // TODO: Deep-link to property/unit screen (parse unit from message).
+                      },
                     );
                   },
                 ),

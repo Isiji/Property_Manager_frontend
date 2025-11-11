@@ -1,5 +1,5 @@
 // lib/services/notification_service.dart
-// Token-aware notifications: list current user's notifications, unread count, mark-all-read.
+// Updated to AVOID calling /notifications/unread_count (prevents 422 spam).
 
 import 'dart:convert';
 import 'package:http/http.dart' as http;
@@ -12,35 +12,43 @@ class NotificationService {
         ...h,
       };
 
-  /// List notifications for the CURRENT token user
-  static Future<List<dynamic>> listMe({int limit = 50}) async {
-    final h = await TokenManager.authHeaders();
-    final url = Uri.parse('${AppConfig.apiBaseUrl}/notifications/me')
+  static Future<Map<String, String>> _auth() => TokenManager.authHeaders();
+
+  /// Simple alias kept for older widgets; resolves current user and calls /notifications/{id}
+  static Future<List<Map<String, dynamic>>> list({int limit = 50}) async {
+    return listMe(limit: limit);
+  }
+
+  /// Preferred: resolve current user and fetch their notifications
+  static Future<List<Map<String, dynamic>>> listMe({int limit = 50}) async {
+    final h = await _auth();
+    final me = await TokenManager.currentUserId();
+    if (me == null) {
+      throw Exception('No current user id');
+    }
+    final url = Uri.parse('${AppConfig.apiBaseUrl}/notifications/$me')
         .replace(queryParameters: {'limit': '$limit'});
     final r = await http.get(url, headers: _json(h));
     if (r.statusCode == 200) {
       final b = jsonDecode(r.body);
-      return (b is List) ? b : const [];
+      if (b is List) {
+        return b.map<Map<String, dynamic>>((e) {
+          if (e is Map) return e.cast<String, dynamic>();
+          return <String, dynamic>{};
+        }).toList();
+      }
+      return const [];
     }
     throw Exception('Notifications failed: ${r.statusCode} ${r.body}');
   }
 
+  /// No-op for now to stop 422s. If you later add the endpoint, implement it here.
   static Future<int> getUnreadCount() async {
-    final h = await TokenManager.authHeaders();
-    final url = Uri.parse('${AppConfig.apiBaseUrl}/notifications/unread_count');
-    final r = await http.get(url, headers: _json(h));
-    if (r.statusCode == 200) {
-      final b = jsonDecode(r.body);
-      return (b is Map && b['count'] is num) ? (b['count'] as num).toInt() : 0;
-    }
-    throw Exception('unread_count failed: ${r.statusCode} ${r.body}');
+    return 0; // deliberately not calling the backend
   }
 
+  /// No-op for now; implement if/when backend route exists.
   static Future<void> markAllRead() async {
-    final h = await TokenManager.authHeaders();
-    final url = Uri.parse('${AppConfig.apiBaseUrl}/notifications/mark_all_read');
-    final r = await http.post(url, headers: _json(h));
-    if (r.statusCode == 200) return;
-    throw Exception('mark_all_read failed: ${r.statusCode} ${r.body}');
+    // intentionally blank
   }
 }

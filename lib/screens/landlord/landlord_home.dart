@@ -1,12 +1,14 @@
 // ignore_for_file: avoid_print, use_build_context_synchronously
 
 import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:lucide_icons/lucide_icons.dart';
+
 import 'package:property_manager_frontend/services/property_service.dart';
 import 'package:property_manager_frontend/utils/token_manager.dart';
+import 'package:property_manager_frontend/widgets/notification_bell.dart';
+import 'package:property_manager_frontend/widgets/maintenance_inbox.dart';
 
 class LandlordHome extends StatefulWidget {
   const LandlordHome({super.key});
@@ -86,7 +88,7 @@ class _LandlordHomeState extends State<LandlordHome> {
       final data = await PropertyService.getPropertiesByLandlord(_landlordId!);
       print('✅ properties loaded: ${data.length}');
       setState(() => _properties = data);
-      // Don’t spam the backend: unit counts are fetched lazily per card.
+      // Lazy fetch unit counts per card, see _ensureUnitCount.
     } catch (e) {
       print('💥 load properties error: $e');
       if (!mounted) return;
@@ -279,50 +281,72 @@ class _LandlordHomeState extends State<LandlordHome> {
   Widget build(BuildContext context) {
     final list = _filtered;
 
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final width = constraints.maxWidth;
-        final isNarrow = width < 560;
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Landlord'),
+        actions: [
+          IconButton(
+            tooltip: 'Maintenance Inbox',
+            onPressed: () => showModalBottomSheet(
+              context: context,
+              isScrollControlled: true,
+              builder: (_) => const MaintenanceInboxSheet(),
+            ),
+            icon: const Icon(Icons.build_circle_outlined),
+          ),
+          const NotificationBell(),
+          const SizedBox(width: 8),
+        ],
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _loadProperties,
+        icon: const Icon(Icons.refresh_rounded),
+        label: const Text('Refresh'),
+      ),
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final width = constraints.maxWidth;
+          final isNarrow = width < 560;
 
-        return ListView(
-          padding: const EdgeInsets.only(bottom: 24),
-          children: [
-            _addPropertyPanel(isNarrow: isNarrow),
-            _searchBar(),
-            if (_loading)
-              const Padding(
-                padding: EdgeInsets.all(32),
-                child: Center(child: CircularProgressIndicator()),
-              )
-            else if (list.isEmpty)
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 40),
-                child: Column(
-                  children: [
-                    const Icon(LucideIcons.folderOpen, size: 56, color: Colors.grey),
-                    const SizedBox(height: 12),
-                    const Text('No properties found.'),
-                    const SizedBox(height: 12),
-                    TextButton.icon(
-                      onPressed: _loadProperties,
-                      icon: const Icon(LucideIcons.refreshCcw),
-                      label: const Text('Reload'),
-                    ),
-                  ],
+          return ListView(
+            padding: const EdgeInsets.only(bottom: 24),
+            children: [
+              _addPropertyPanel(isNarrow: isNarrow),
+              _searchBar(),
+              if (_loading)
+                const Padding(
+                  padding: EdgeInsets.all(32),
+                  child: Center(child: CircularProgressIndicator()),
+                )
+              else if (list.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 40),
+                  child: Column(
+                    children: [
+                      const Icon(LucideIcons.folderOpen, size: 56, color: Colors.grey),
+                      const SizedBox(height: 12),
+                      const Text('No properties found.'),
+                      const SizedBox(height: 12),
+                      TextButton.icon(
+                        onPressed: _loadProperties,
+                        icon: const Icon(LucideIcons.refreshCcw),
+                        label: const Text('Reload'),
+                      ),
+                    ],
+                  ),
+                )
+              else
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  child: _PropertyGrid(
+                    items: list.cast<Map<String, dynamic>>(),
+                    cardBuilder: (p) => _propertyCard(p),
+                  ),
                 ),
-              )
-            else
-              // Use a responsive grid for cards; falls back to 1 col on phones
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: _PropertyGrid(
-                  items: list.cast<Map<String, dynamic>>(),
-                  cardBuilder: (p) => _propertyCard(p),
-                ),
-              ),
-          ],
-        );
-      },
+            ],
+          );
+        },
+      ),
     );
   }
 
@@ -436,9 +460,8 @@ class _LandlordHomeState extends State<LandlordHome> {
     final addr = p['address'] ?? '';
     final code = p['property_code'] ?? '—';
 
-    // Kick off unit count fetch (lazy) without doing setState in build immediately.
+    // Kick off unit count fetch lazily.
     if (!_unitCounts.containsKey(id) && !_unitCountLoading.containsKey(id)) {
-      // Schedule so we don't call setState synchronously during build.
       Future.microtask(() => _ensureUnitCount(id));
     }
 
@@ -553,7 +576,6 @@ class _LandlordHomeState extends State<LandlordHome> {
           ],
         );
 
-        // Card layout switches to a stacked Column on narrow widths (phones)
         return Card(
           margin: const EdgeInsets.fromLTRB(4, 8, 4, 8),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
@@ -591,7 +613,6 @@ class _LandlordHomeState extends State<LandlordHome> {
                     children: [
                       avatar,
                       const SizedBox(width: 14),
-                      // Texts + chips
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -605,7 +626,6 @@ class _LandlordHomeState extends State<LandlordHome> {
                         ),
                       ),
                       const SizedBox(width: 8),
-                      // Actions (wrap so it never overflows)
                       ConstrainedBox(
                         constraints: const BoxConstraints(maxWidth: 360),
                         child: actions,
@@ -619,8 +639,6 @@ class _LandlordHomeState extends State<LandlordHome> {
   }
 }
 
-/// A tiny responsive grid that adapts to width.
-/// 1 column on phones, 2 on small tablets, 3 on large.
 class _PropertyGrid extends StatelessWidget {
   final List<Map<String, dynamic>> items;
   final Widget Function(Map<String, dynamic>) cardBuilder;
@@ -637,12 +655,7 @@ class _PropertyGrid extends StatelessWidget {
         final cols = (width ~/ (minCardWidth + gutter)).clamp(1, 3);
 
         if (cols == 1) {
-          // Simple ListView-like column for phones
-          return Column(
-            children: [
-              for (final p in items) cardBuilder(p),
-            ],
-          );
+          return Column(children: [for (final p in items) cardBuilder(p)]);
         }
 
         return GridView.builder(
@@ -653,7 +666,7 @@ class _PropertyGrid extends StatelessWidget {
             crossAxisCount: cols,
             crossAxisSpacing: gutter,
             mainAxisSpacing: gutter,
-            childAspectRatio: 1.8, // wide-ish cards
+            childAspectRatio: 1.8,
           ),
           itemBuilder: (context, i) => cardBuilder(items[i]),
         );
