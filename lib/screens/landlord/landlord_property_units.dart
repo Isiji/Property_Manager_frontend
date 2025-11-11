@@ -1,10 +1,12 @@
-// Landlord property units screen
-// - Remind All + Reports placed in the header card (right), clearer contrast.
-// - Derives displayed occupancy from lease.active (wins over server 'status').
-// - Handles 409 “tenant already exists (id=XX)” by linking existing tenant.
-// - Copy/Call/WhatsApp actions for tenant phone; copy property code.
-// - Collections summary card.
-// - Backfills tenant name/phone via /units/{id}/tenant when lease is active but tenant is null.
+// Landlord property units screen (responsive)
+// - Header + Collections summary.
+// - Units section responsive:
+//     * < 720px: stacked cards (1 col)
+//     * 720–1100px: card grid (2–3 cols depending on width)
+//     * >= 1100px: wide DataTable
+// - Copy/call/WhatsApp for tenant phone; copy for property code.
+// - Backfills tenant via /units/{id}/tenant when lease is active but tenant is null.
+// - Derives occupancy from lease.active to avoid stale "status" mismatches.
 
 import 'dart:async';
 import 'dart:convert';
@@ -398,11 +400,9 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
     try {
       final today = _todayDate();
       await LeaseService.endLease(leaseId: leaseId, endDate: today);
-
       if (tenantId != null) {
         await TenantService.deleteTenant(tenantId);
       }
-
       await _loadDetailed();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -595,229 +595,301 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
           const SizedBox(width: 8),
         ],
       ),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          // ===== Header card (buttons here) =====
-          Container(
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final width = constraints.maxWidth;
+
+          return ListView(
             padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: t.colorScheme.surface,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: t.dividerColor.withOpacity(.25)),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Title + Actions (right)
-                Row(
+            children: [
+              // Header card
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: t.colorScheme.surface,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: t.dividerColor.withOpacity(.25)),
+                ),
+                child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Expanded(
-                      child: Text(
-                        name,
-                        style: t.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
-                      ),
-                    ),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
+                    // Title + Actions (right)
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        ElevatedButton.icon(
-                          onPressed: () {
-                            Navigator.of(context).push(MaterialPageRoute(
-                              builder: (_) => LandlordReportsScreen(propertyId: _property!['id'] as int),
-                            ));
-                          },
-                          icon: const Icon(Icons.analytics_outlined, size: 18),
-                          label: const Text('Reports'),
+                        Expanded(
+                          child: Text(
+                            name,
+                            style: t.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
+                          ),
                         ),
-                        FilledButton.icon(
-                          onPressed: _sendBulkReminders,
-                          icon: const Icon(Icons.campaign_rounded, size: 18),
-                          label: const Text('Remind All Unpaid'),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                Row(
-                  children: [
-                    Icon(Icons.location_on_outlined, size: 18, color: t.hintColor),
-                    const SizedBox(width: 6),
-                    Expanded(child: Text(address, style: t.textTheme.bodyMedium)),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                Wrap(
-                  spacing: 16,
-                  runSpacing: 10,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: [
-                    _InfoChip(icon: Icons.grid_view_rounded, label: 'Total', value: '$total'),
-                    _InfoChip(icon: Icons.person_pin_circle_rounded, label: 'Occupied', value: '$occupiedCount'),
-                    _InfoChip(icon: Icons.meeting_room_rounded, label: 'Vacant', value: '$vacant'),
-                    _CopyableChip(
-                      icon: Icons.qr_code_2_rounded,
-                      label: 'Property Code',
-                      value: code,
-                      onCopy: () => _copyText('Property code', code.toString()),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-
-          const SizedBox(height: 16),
-
-          // Collections summary
-          _CollectionsReportCard(
-            periodLabel: _currentPeriod(),
-            expected: summary['expected'] ?? 0,
-            collected: summary['collected'] ?? 0,
-            outstanding: summary['outstanding'] ?? 0,
-            paidCount: (summary['paidCount'] ?? 0).toInt(),
-            unpaidCount: (summary['unpaidCount'] ?? 0).toInt(),
-            occupancyPct: summary['occupancyPct'] ?? 0,
-            formatter: _fmtMoney,
-          ),
-
-          const SizedBox(height: 20),
-
-          Row(
-            children: [
-              Text('Units • ${_currentPeriod()}',
-                  style: t.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
-              const Spacer(),
-              FilledButton.icon(
-                onPressed: _addUnit,
-                icon: const Icon(Icons.add),
-                label: const Text('Add Unit'),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-
-          if (_units.isEmpty)
-            Container(
-              padding: const EdgeInsets.symmetric(vertical: 40),
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: t.colorScheme.surface,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: t.dividerColor.withOpacity(.25)),
-              ),
-              child: const Text('No units yet'),
-            )
-          else
-            Card(
-              elevation: 0,
-              color: t.colorScheme.surface,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16),
-                side: BorderSide(color: t.dividerColor.withOpacity(.25)),
-              ),
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: DataTable(
-                  columns: const [
-                    DataColumn(label: Text('Unit')),
-                    DataColumn(label: Text('Rent')),
-                    DataColumn(label: Text('Status')),
-                    DataColumn(label: Text('Tenant (Name • Phone)')),
-                    DataColumn(label: Text('This Month')),
-                    DataColumn(label: Text('Actions')),
-                  ],
-                  rows: _units.map((u) {
-                    final unitMap = u as Map<String, dynamic>;
-                    final unitId = (unitMap['id'] as num).toInt();
-                    final status = _displayedStatus(unitMap);
-                    final rent = (unitMap['rent_amount'] ?? '').toString();
-
-                    final tenantName = (unitMap['tenant']?['name'] ?? '—').toString();
-                    final tenantPhone = (unitMap['tenant']?['phone'] ?? '—').toString();
-
-                    final rs = _rentStatus[unitId];
-                    final paid = rs?['paid'] == true;
-                    final amountDue = rs?['amount_due'];
-
-                    return DataRow(
-                      cells: [
-                        DataCell(Text(unitMap['number']?.toString() ?? '—')),
-                        DataCell(Text(rent)),
-                        DataCell(_statusChip(status, t)),
-                        DataCell(_TenantCell(
-                          name: tenantName,
-                          phone: tenantPhone,
-                          onCopy: tenantPhone.trim().isEmpty || tenantPhone == '—'
-                              ? null
-                              : () => _copyText('Phone', tenantPhone),
-                          onCall: tenantPhone.trim().isEmpty || tenantPhone == '—'
-                              ? null
-                              : () => _launchPhone(tenantPhone),
-                          onWhatsApp: tenantPhone.trim().isEmpty || tenantPhone == '—'
-                              ? null
-                              : () => _launchWhatsApp(tenantPhone),
-                        )),
-                        DataCell(_rentChip(paid, amountDue, t)),
-                        DataCell(Row(
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
                           children: [
-                            PopupMenuButton<String>(
-                              onSelected: (value) {
-                                switch (value) {
-                                  case 'assign':
-                                    _assignTenant(unitMap);
-                                    break;
-                                  case 'end_lease':
-                                    _endLease(unitMap);
-                                    break;
-                                  case 'edit':
-                                    _editUnit(unitMap);
-                                    break;
-                                  case 'delete':
-                                    _deleteUnit(unitId);
-                                    break;
-                                  case 'record':
-                                    _recordPayment(unitMap);
-                                    break;
-                                  case 'remind':
-                                    _sendReminder(unitMap);
-                                    break;
-                                }
+                            ElevatedButton.icon(
+                              onPressed: () {
+                                Navigator.of(context).push(MaterialPageRoute(
+                                  builder: (_) => LandlordReportsScreen(propertyId: _property!['id'] as int),
+                                ));
                               },
-                              itemBuilder: (context) {
-                                final items = <PopupMenuEntry<String>>[];
-                                if (status == 'vacant') {
-                                  items.add(const PopupMenuItem(value: 'assign', child: Text('👤 Assign Tenant')));
-                                  items.add(const PopupMenuItem(value: 'edit', child: Text('✏️ Edit Unit')));
-                                  items.add(const PopupMenuItem(value: 'delete', child: Text('🗑️ Delete Unit')));
-                                } else {
-                                  items.add(const PopupMenuItem(value: 'end_lease', child: Text('🔚 End Lease')));
-                                  if (!(rs?['paid'] == true)) {
-                                    items.add(const PopupMenuItem(value: 'record', child: Text('💵 Record Payment')));
-                                    items.add(const PopupMenuItem(value: 'remind', child: Text('📣 Send Reminder')));
-                                  }
-                                  items.add(const PopupMenuItem(value: 'edit', child: Text('✏️ Edit Unit')));
-                                  items.add(const PopupMenuItem(value: 'delete', child: Text('🗑️ Delete Unit')));
-                                }
-                                return items;
-                              },
+                              icon: const Icon(Icons.analytics_outlined, size: 18),
+                              label: const Text('Reports'),
+                            ),
+                            FilledButton.icon(
+                              onPressed: _sendBulkReminders,
+                              icon: const Icon(Icons.campaign_rounded, size: 18),
+                              label: const Text('Remind All Unpaid'),
                             ),
                           ],
-                        )),
+                        ),
                       ],
-                    );
-                  }).toList(),
+                    ),
+                    const SizedBox(height: 6),
+                    Row(
+                      children: [
+                        Icon(Icons.location_on_outlined, size: 18, color: t.hintColor),
+                        const SizedBox(width: 6),
+                        Expanded(child: Text(address, style: t.textTheme.bodyMedium)),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Wrap(
+                      spacing: 16,
+                      runSpacing: 10,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        _InfoChip(icon: Icons.grid_view_rounded, label: 'Total', value: '$total'),
+                        _InfoChip(icon: Icons.person_pin_circle_rounded, label: 'Occupied', value: '$occupiedCount'),
+                        _InfoChip(icon: Icons.meeting_room_rounded, label: 'Vacant', value: '$vacant'),
+                        _CopyableChip(
+                          icon: Icons.qr_code_2_rounded,
+                          label: 'Property Code',
+                          value: code,
+                          onCopy: () => _copyText('Property code', code.toString()),
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
               ),
-            ),
-        ],
+
+              const SizedBox(height: 16),
+
+              // Collections summary
+              _CollectionsReportCard(
+                periodLabel: _currentPeriod(),
+                expected: summary['expected'] ?? 0,
+                collected: summary['collected'] ?? 0,
+                outstanding: summary['outstanding'] ?? 0,
+                paidCount: (summary['paidCount'] ?? 0).toInt(),
+                unpaidCount: (summary['unpaidCount'] ?? 0).toInt(),
+                occupancyPct: summary['occupancyPct'] ?? 0,
+                formatter: _fmtMoney,
+              ),
+
+              const SizedBox(height: 20),
+
+              Row(
+                children: [
+                  Text('Units • ${_currentPeriod()}',
+                      style: t.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
+                  const Spacer(),
+                  FilledButton.icon(
+                    onPressed: _addUnit,
+                    icon: const Icon(Icons.add),
+                    label: const Text('Add Unit'),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+
+              // Responsive Units
+              if (_units.isEmpty)
+                Container(
+                  padding: const EdgeInsets.symmetric(vertical: 40),
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: t.colorScheme.surface,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: t.dividerColor.withOpacity(.25)),
+                  ),
+                  child: const Text('No units yet'),
+                )
+              else
+                _buildResponsiveUnits(width, t),
+            ],
+          );
+        },
       ),
     );
   }
 
+  // Chooses layout based on width breakpoints
+  Widget _buildResponsiveUnits(double width, ThemeData t) {
+    if (width >= 1100) return _buildUnitsTable(t);
+    // Cards/grid for mobile and tablets
+    final cardMinWidth = 360.0;
+    final gutter = 12.0;
+    final cols = width < 720
+        ? 1
+        : (width ~/ (cardMinWidth + gutter)).clamp(1, 3);
+
+    return GridView.builder(
+      itemCount: _units.length,
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: cols,
+        crossAxisSpacing: gutter,
+        mainAxisSpacing: gutter,
+        childAspectRatio: 1.35,
+      ),
+      itemBuilder: (context, index) {
+        final u = _units[index] as Map<String, dynamic>;
+        final unitId = (u['id'] as num).toInt();
+        final status = _displayedStatus(u);
+        final rent = (u['rent_amount'] ?? '').toString();
+
+        final tenantName = (u['tenant']?['name'] ?? '—').toString();
+        final tenantPhone = (u['tenant']?['phone'] ?? '—').toString();
+
+        final rs = _rentStatus[unitId];
+        final paid = rs?['paid'] == true;
+        final amountDue = rs?['amount_due'];
+
+        return _UnitCard(
+          unitLabel: u['number']?.toString() ?? '—',
+          rent: rent,
+          statusChip: _statusChip(status, t),
+          tenant: _TenantCell(
+            name: tenantName,
+            phone: tenantPhone,
+            onCopy: tenantPhone.trim().isEmpty || tenantPhone == '—'
+                ? null
+                : () => _copyText('Phone', tenantPhone),
+            onCall: tenantPhone.trim().isEmpty || tenantPhone == '—'
+                ? null
+                : () => _launchPhone(tenantPhone),
+            onWhatsApp: tenantPhone.trim().isEmpty || tenantPhone == '—'
+                ? null
+                : () => _launchWhatsApp(tenantPhone),
+          ),
+          monthChip: _rentChip(paid, amountDue, t),
+          actionsBuilder: () => _unitActionsMenu(u, status, rs),
+        );
+      },
+    );
+  }
+
+  // Actions popup used by both layouts
+  Widget _unitActionsMenu(Map<String, dynamic> u, String status, Map<String, dynamic>? rs) {
+    final unitId = (u['id'] as num).toInt();
+    return PopupMenuButton<String>(
+      onSelected: (value) {
+        switch (value) {
+          case 'assign':
+            _assignTenant(u);
+            break;
+          case 'end_lease':
+            _endLease(u);
+            break;
+          case 'edit':
+            _editUnit(u);
+            break;
+          case 'delete':
+            _deleteUnit(unitId);
+            break;
+          case 'record':
+            _recordPayment(u);
+            break;
+          case 'remind':
+            _sendReminder(u);
+            break;
+        }
+      },
+      itemBuilder: (context) {
+        final items = <PopupMenuEntry<String>>[];
+        if (status == 'vacant') {
+          items.add(const PopupMenuItem(value: 'assign', child: Text('👤 Assign Tenant')));
+          items.add(const PopupMenuItem(value: 'edit', child: Text('✏️ Edit Unit')));
+          items.add(const PopupMenuItem(value: 'delete', child: Text('🗑️ Delete Unit')));
+        } else {
+          items.add(const PopupMenuItem(value: 'end_lease', child: Text('🔚 End Lease')));
+          if (!(rs?['paid'] == true)) {
+            items.add(const PopupMenuItem(value: 'record', child: Text('💵 Record Payment')));
+            items.add(const PopupMenuItem(value: 'remind', child: Text('📣 Send Reminder')));
+          }
+          items.add(const PopupMenuItem(value: 'edit', child: Text('✏️ Edit Unit')));
+          items.add(const PopupMenuItem(value: 'delete', child: Text('🗑️ Delete Unit')));
+        }
+        return items;
+      },
+    );
+  }
+
+  // Wide table layout
+  Widget _buildUnitsTable(ThemeData t) {
+    return Card(
+      elevation: 0,
+      color: t.colorScheme.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: t.dividerColor.withOpacity(.25)),
+      ),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: DataTable(
+          columns: const [
+            DataColumn(label: Text('Unit')),
+            DataColumn(label: Text('Rent')),
+            DataColumn(label: Text('Status')),
+            DataColumn(label: Text('Tenant (Name • Phone)')),
+            DataColumn(label: Text('This Month')),
+            DataColumn(label: Text('Actions')),
+          ],
+          rows: _units.map((u) {
+            final unitMap = u as Map<String, dynamic>;
+            final unitId = (unitMap['id'] as num).toInt();
+            final status = _displayedStatus(unitMap);
+            final rent = (unitMap['rent_amount'] ?? '').toString();
+
+            final tenantName = (unitMap['tenant']?['name'] ?? '—').toString();
+            final tenantPhone = (unitMap['tenant']?['phone'] ?? '—').toString();
+
+            final rs = _rentStatus[unitId];
+            final paid = rs?['paid'] == true;
+            final amountDue = rs?['amount_due'];
+
+            return DataRow(
+              cells: [
+                DataCell(Text(unitMap['number']?.toString() ?? '—')),
+                DataCell(Text(rent)),
+                DataCell(_statusChip(status, t)),
+                DataCell(_TenantCell(
+                  name: tenantName,
+                  phone: tenantPhone,
+                  onCopy: tenantPhone.trim().isEmpty || tenantPhone == '—'
+                      ? null
+                      : () => _copyText('Phone', tenantPhone),
+                  onCall: tenantPhone.trim().isEmpty || tenantPhone == '—'
+                      ? null
+                      : () => _launchPhone(tenantPhone),
+                  onWhatsApp: tenantPhone.trim().isEmpty || tenantPhone == '—'
+                      ? null
+                      : () => _launchWhatsApp(tenantPhone),
+                )),
+                DataCell(_rentChip(paid, amountDue, t)),
+                DataCell(Row(children: [ _unitActionsMenu(unitMap, status, rs) ])),
+              ],
+            );
+          }).toList(),
+        ),
+      ),
+    );
+  }
+
+  // Pills & chips
   Widget _statusChip(String status, ThemeData t) {
     final isOcc = status == 'occupied';
     return Container(
@@ -855,6 +927,8 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
     );
   }
 }
+
+// ---------- Small components ----------
 
 class _InfoChip extends StatelessWidget {
   final IconData icon;
@@ -957,6 +1031,35 @@ class _TenantCell extends StatelessWidget {
   }
 }
 
+class _MetricPill extends StatelessWidget {
+  final String label;
+  final String value;
+  final IconData icon;
+  const _MetricPill({required this.label, required this.value, required this.icon});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: t.colorScheme.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: t.dividerColor.withOpacity(.25)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 18, color: t.hintColor),
+          const SizedBox(width: 8),
+          Text('$label: ', style: t.textTheme.labelMedium),
+          Text(value, style: t.textTheme.labelMedium?.copyWith(fontWeight: FontWeight.w800)),
+        ],
+      ),
+    );
+  }
+}
+
 class _CollectionsReportCard extends StatelessWidget {
   final String periodLabel;
   final num expected;
@@ -1011,43 +1114,15 @@ class _CollectionsReportCard extends StatelessWidget {
   }
 }
 
-class _MetricPill extends StatelessWidget {
-  final String label;
-  final String value;
-  final IconData icon;
-  const _MetricPill({required this.label, required this.value, required this.icon});
-
-  @override
-  Widget build(BuildContext context) {
-    final t = Theme.of(context);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      decoration: BoxDecoration(
-        color: t.colorScheme.surface,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: t.dividerColor.withOpacity(.25)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 18, color: t.hintColor),
-          const SizedBox(width: 8),
-          Text('$label: ', style: t.textTheme.labelMedium),
-          Text(value, style: t.textTheme.labelMedium?.copyWith(fontWeight: FontWeight.w800)),
-        ],
-      ),
-    );
-  }
-}
-
 // ---- Dialogs ----
 
 class _UnitDialog extends StatefulWidget {
   final String? initialNumber;
   final String? initialRent;
   const _UnitDialog({Key? key, this.initialNumber, this.initialRent}) : super(key: key);
+
   @override
-  State<_UnitDialog> createState() => _UnitDialogState();
+  State<_UnitDialog> createState() => _UnitDialogState(); // ✅ fixed createState()
 }
 
 class _UnitDialogState extends State<_UnitDialog> {
@@ -1071,7 +1146,7 @@ class _UnitDialogState extends State<_UnitDialog> {
         child: SizedBox(
           width: 420,
           child: Column(
-            mainAxisSize: MainAxisSize.min, // <-- fixed here
+            mainAxisSize: MainAxisSize.min,
             children: [
               TextFormField(
                 controller: _numCtrl,
@@ -1223,4 +1298,111 @@ class _UnitData {
   final String number;
   final double rentAmount;
   _UnitData({required this.number, required this.rentAmount});
+}
+
+// ---------- Unit Card (responsive) ----------
+class _UnitCard extends StatelessWidget {
+  final String unitLabel;
+  final String rent;
+  final Widget statusChip;
+  final Widget tenant;
+  final Widget monthChip;
+  final Widget Function() actionsBuilder;
+
+  const _UnitCard({
+    required this.unitLabel,
+    required this.rent,
+    required this.statusChip,
+    required this.tenant,
+    required this.monthChip,
+    required this.actionsBuilder,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: t.colorScheme.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: t.dividerColor.withOpacity(.25)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Top row: Unit label + actions
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  unitLabel,
+                  style: t.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+                ),
+              ),
+              actionsBuilder(),
+            ],
+          ),
+          const SizedBox(height: 8),
+          // Rent + Status
+          Wrap(
+            spacing: 10,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              _MiniPill(icon: Icons.request_quote_rounded, label: 'Rent', value: rent),
+              statusChip,
+            ],
+          ),
+          const SizedBox(height: 10),
+          // Tenant
+          Row(
+            children: [
+              Icon(Icons.person_outline_rounded, size: 18, color: t.hintColor),
+              const SizedBox(width: 6),
+              Expanded(child: tenant),
+            ],
+          ),
+          const SizedBox(height: 10),
+          // Month state
+          Row(
+            children: [
+              Icon(Icons.event_note_outlined, size: 18, color: t.hintColor),
+              const SizedBox(width: 6),
+              monthChip,
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MiniPill extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String value;
+  const _MiniPill({required this.icon, required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: t.colorScheme.surface,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: t.dividerColor.withOpacity(.25)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 16, color: t.hintColor),
+          const SizedBox(width: 6),
+          Text('$label: ', style: t.textTheme.labelSmall),
+          Text(value, style: t.textTheme.labelSmall?.copyWith(fontWeight: FontWeight.w800)),
+        ],
+      ),
+    );
+  }
 }
