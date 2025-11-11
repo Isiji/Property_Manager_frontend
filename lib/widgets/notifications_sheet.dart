@@ -3,6 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:property_manager_frontend/services/notification_service.dart';
 
 class NotificationsSheet extends StatefulWidget {
+  /// When a notification implies “go to maintenance inbox”, we pop with this result.
+  static const resultOpenMaintenance = 'open_inbox';
+
   const NotificationsSheet({super.key});
   @override
   State<NotificationsSheet> createState() => _NotificationsSheetState();
@@ -10,7 +13,7 @@ class NotificationsSheet extends StatefulWidget {
 
 class _NotificationsSheetState extends State<NotificationsSheet> {
   bool _loading = true;
-  List<dynamic> _items = [];
+  List<Map<String, dynamic>> _items = const [];
 
   @override
   void initState() {
@@ -22,7 +25,9 @@ class _NotificationsSheetState extends State<NotificationsSheet> {
     try {
       setState(() => _loading = true);
       final list = await NotificationService.list(limit: 100);
-      setState(() => _items = list);
+      setState(() => _items = List<Map<String, dynamic>>.from(
+        list.map((e) => (e is Map) ? e.cast<String, dynamic>() : <String, dynamic>{}),
+      ));
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to load: $e')));
@@ -34,13 +39,20 @@ class _NotificationsSheetState extends State<NotificationsSheet> {
   Future<void> _markAllRead() async {
     try {
       await NotificationService.markAllRead();
-      await _load();
+      // Clear UI immediately so they “disappear”
+      setState(() => _items = const []);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Marked all as read')));
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed: $e')));
     }
+  }
+
+  bool _looksLikeMaintenance(Map<String, dynamic> n) {
+    final t = (n['title'] ?? '').toString().toLowerCase();
+    final m = (n['message'] ?? '').toString().toLowerCase();
+    return t.contains('maintenance') || m.contains('maintenance') || m.contains('unit ');
   }
 
   @override
@@ -81,17 +93,30 @@ class _NotificationsSheetState extends State<NotificationsSheet> {
                   itemCount: _items.length,
                   separatorBuilder: (_, __) => const SizedBox(height: 8),
                   itemBuilder: (_, i) {
-                    final n = (_items[i] as Map).cast<String, dynamic>();
+                    final n = _items[i];
                     final title = (n['title'] ?? '').toString();
                     final msg = (n['message'] ?? '').toString();
                     final isRead = n['is_read'] == true;
                     final ts = (n['created_at'] ?? '').toString();
-                    return ListTile(
-                      leading: Icon(
-                        isRead ? Icons.notifications_none_rounded : Icons.notifications_active_rounded,
+
+                    return Card(
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        side: BorderSide(color: t.dividerColor.withOpacity(.25)),
                       ),
-                      title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
-                      subtitle: Text('$msg\n$ts', maxLines: 3, overflow: TextOverflow.ellipsis),
+                      child: ListTile(
+                        onTap: () {
+                          if (_looksLikeMaintenance(n)) {
+                            Navigator.of(context).pop(NotificationsSheet.resultOpenMaintenance);
+                          }
+                        },
+                        leading: Icon(
+                          isRead ? Icons.notifications_none_rounded : Icons.notifications_active_rounded,
+                        ),
+                        title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
+                        subtitle: Text('$msg\n$ts', maxLines: 3, overflow: TextOverflow.ellipsis),
+                      ),
                     );
                   },
                 ),
