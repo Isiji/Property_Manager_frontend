@@ -1,9 +1,6 @@
-// lib/widgets/notification_bell.dart
-import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:property_manager_frontend/services/notification_service.dart';
 import 'package:property_manager_frontend/widgets/notifications_sheet.dart';
-import 'package:property_manager_frontend/widgets/maintenance_inbox.dart';
 
 class NotificationBell extends StatefulWidget {
   const NotificationBell({super.key});
@@ -12,65 +9,48 @@ class NotificationBell extends StatefulWidget {
 }
 
 class _NotificationBellState extends State<NotificationBell> {
-  int _unread = 0;
-  Timer? _timer;
+  int _count = 0;
+  bool _loading = false;
 
   @override
   void initState() {
     super.initState();
-    _tick();
-    // Poll every 30s so the badge reflects new activity
-    _timer = Timer.periodic(const Duration(seconds: 30), (_) => _tick());
+    _refreshCount();
   }
 
-  @override
-  void dispose() {
-    _timer?.cancel();
-    super.dispose();
-  }
-
-  Future<void> _tick() async {
+  Future<void> _refreshCount() async {
+    if (_loading) return;
+    setState(() => _loading = true);
     try {
-      final n = await NotificationService.getUnreadCount();
-      if (mounted) setState(() => _unread = n);
-    } catch (_) {}
+      final c = await NotificationService.getUnreadCount();
+      if (mounted) setState(() => _count = c);
+    } catch (_) {} finally {
+      if (mounted) setState(() => _loading = false);
+    }
   }
 
-  Future<void> _open() async {
-    final result = await showModalBottomSheet(
+  Future<void> _openSheet() async {
+    await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      useSafeArea: true,
-      builder: (_) => const NotificationsSheet(),
+      builder: (_) => NotificationsSheet(onChanged: _refreshCount),
     );
-    // Refresh badge when sheet closes
-    await _tick();
-
-    // Deep-link to Maintenance Inbox if requested by the sheet
-    if (result == NotificationsSheet.resultOpenMaintenance && mounted) {
-      await showModalBottomSheet(
-        context: context,
-        isScrollControlled: true,
-        useSafeArea: true,
-        builder: (_) => const MaintenanceInboxSheet(),
-      );
-    }
+    await _refreshCount();
   }
 
   @override
   Widget build(BuildContext context) {
     return Stack(
-      clipBehavior: Clip.none,
       children: [
         IconButton(
-          onPressed: _open,
+          onPressed: _openSheet,
           icon: const Icon(Icons.notifications_rounded),
           tooltip: 'Notifications',
         ),
-        if (_unread > 0)
+        if (_count > 0)
           Positioned(
-            right: 6,
-            top: 6,
+            right: 8,
+            top: 8,
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
               decoration: BoxDecoration(
@@ -78,8 +58,8 @@ class _NotificationBellState extends State<NotificationBell> {
                 borderRadius: BorderRadius.circular(999),
               ),
               child: Text(
-                _unread > 99 ? '99+' : '$_unread',
-                style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w800),
+                '$_count',
+                style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w800),
               ),
             ),
           ),

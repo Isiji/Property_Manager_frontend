@@ -1,6 +1,3 @@
-// lib/services/notification_service.dart
-// Token-aware notifications (no user_id in URL)
-
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:property_manager_frontend/core/config.dart';
@@ -12,10 +9,10 @@ class NotificationService {
         ...h,
       };
 
-  static Future<List<dynamic>> list({int limit = 50}) async {
+  static Future<List<dynamic>> list({int limit = 50, String? type}) async {
     final h = await TokenManager.authHeaders();
-    final url = Uri.parse('${AppConfig.apiBaseUrl}/notifications')
-        .replace(queryParameters: {'limit': '$limit'});
+    final qp = <String, String>{'limit': '$limit', if (type != null) 'type': type};
+    final url = Uri.parse('${AppConfig.apiBaseUrl}/notifications').replace(queryParameters: qp);
     final r = await http.get(url, headers: _json(h));
     if (r.statusCode == 200) {
       final b = jsonDecode(r.body);
@@ -39,7 +36,17 @@ class NotificationService {
     final h = await TokenManager.authHeaders();
     final url = Uri.parse('${AppConfig.apiBaseUrl}/notifications/mark_all_read');
     final r = await http.post(url, headers: _json(h));
-    if (r.statusCode == 200) return;
-    throw Exception('mark_all_read failed: ${r.statusCode} ${r.body}');
+    if (r.statusCode != 200) {
+      throw Exception('mark_all_read failed: ${r.statusCode} ${r.body}');
+    }
+  }
+
+  static Future<void> markRead(int notifId) async {
+    final h = await TokenManager.authHeaders();
+    final url = Uri.parse('${AppConfig.apiBaseUrl}/notifications/$notifId/read');
+    final r = await http.put(url, headers: _json(h));
+    if (r.statusCode != 200) {
+      throw Exception('mark_read failed: ${r.statusCode} ${r.body}');
+    }
   }
 }
