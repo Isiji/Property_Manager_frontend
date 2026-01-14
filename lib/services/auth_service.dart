@@ -6,12 +6,6 @@ import 'package:property_manager_frontend/core/config.dart';
 import 'package:property_manager_frontend/utils/token_manager.dart';
 
 class AuthService {
-  Map<String, String> _baseHeadersUnauthed() => const {
-        'Content-Type': 'application/json',
-        // 👇 needed to bypass ngrok warning for unauthenticated endpoints too
-        'ngrok-skip-browser-warning': 'true',
-      };
-
   /// =============================
   /// 🔹 REGISTER USER
   /// =============================
@@ -22,26 +16,42 @@ class AuthService {
     String? password,
     required String role,
     String? propertyCode,
-    int? unitId,            // legacy (kept for compatibility)
-    String? unitNumber,     // NEW (preferred)
+    int? unitId,            // preferred for tenant (more reliable)
+    String? unitNumber,     // optional alternative (supported by backend too)
     String? idNumber,       // optional National ID
   }) async {
-    if (role != 'tenant' && (password == null || password.isEmpty)) {
-      throw Exception('Password is required for $role registration.');
+    final r = role.trim().toLowerCase();
+
+    // Non-tenant roles require password
+    if (r != 'tenant' && (password == null || password.trim().isEmpty)) {
+      throw Exception('Password is required for $r registration.');
+    }
+
+    // Tenant requires propertyCode + unitId OR unitNumber
+    if (r == 'tenant') {
+      if (propertyCode == null || propertyCode.trim().isEmpty) {
+        throw Exception('Property code is required for tenant registration.');
+      }
+      final hasUnitId = unitId != null;
+      final hasUnitNumber = unitNumber != null && unitNumber.trim().isNotEmpty;
+      if (!hasUnitId && !hasUnitNumber) {
+        throw Exception('Select a valid unit for tenant registration.');
+      }
     }
 
     final url = Uri.parse(AppConfig.registerEndpoint);
+
     final payload = <String, dynamic>{
-      'name': name,
-      'phone': phone,
-      'email': email,
-      'password': password,
-      'role': role,
-      'property_code': propertyCode,
-      // prefer number; send id only when number is absent
-      'unit_number': unitNumber,
-      'unit_id': unitNumber == null ? unitId : null,
-      'id_number': idNumber,
+      'name': name.trim(),
+      'phone': phone.trim(),
+      'email': (email == null || email.trim().isEmpty) ? null : email.trim(),
+      'password': (password == null || password.trim().isEmpty) ? null : password.trim(),
+      'role': r,
+      // Backend expects snake_case
+      'property_code': (propertyCode == null || propertyCode.trim().isEmpty) ? null : propertyCode.trim(),
+      'unit_id': unitId,
+      'unit_number': (unitNumber == null || unitNumber.trim().isEmpty) ? null : unitNumber.trim(),
+      'id_number': (idNumber == null || idNumber.trim().isEmpty) ? null : idNumber.trim(),
     }..removeWhere((_, v) => v == null);
 
     print('➡️ Sending to: $url');
@@ -74,11 +84,15 @@ class AuthService {
     String? password,
     required String role,
   }) async {
+    final r = role.trim().toLowerCase();
     final url = Uri.parse(AppConfig.loginEndpoint);
-    final payload = {
-      'phone': phone,
-      'password': password,
-      'role': role,
+
+    // Tenant login passwordless allowed (backend allows null password for tenant)
+    final payload = <String, dynamic>{
+      'phone': phone.trim(),
+      'role': r,
+      // For non-tenant roles password must be present; for tenant it can be null.
+      'password': (password == null || password.trim().isEmpty) ? null : password.trim(),
     }..removeWhere((_, v) => v == null);
 
     print('➡️ Sending login to: $url');
@@ -104,14 +118,12 @@ class AuthService {
         throw Exception('Missing access token in response');
       }
 
-      // Decode JWT to read role (fallback to requested role)
       final decoded = JwtDecoder.decode(token);
-      final roleFromToken = decoded['role'] ?? role;
+      final roleFromToken = (decoded['role'] ?? r).toString();
 
       print('🔑 Decoded Token: $decoded');
       print('✅ Login success: role=$roleFromToken, id=$userId');
 
-      // Persist session
       await TokenManager.saveSession(
         token: token,
         role: roleFromToken,
@@ -137,7 +149,6 @@ class AuthService {
       headers: {
         'Content-Type': 'application/json',
         ...headers,
-        // headers already include the ngrok header, but harmless if duplicated
         'ngrok-skip-browser-warning': 'true',
       },
     );
@@ -149,7 +160,7 @@ class AuthService {
       final data = jsonDecode(response.body);
       return (data is Map) ? data.cast<String, dynamic>() : <String, dynamic>{};
     } else {
-      throw Exception('Failed to load profile');
+      throw Exception('Failed to load profile: ${response.body}');
     }
   }
 }

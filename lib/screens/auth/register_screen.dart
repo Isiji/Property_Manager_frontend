@@ -1,11 +1,7 @@
 // ignore_for_file: avoid_print, use_build_context_synchronously
 
-import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-
 import 'package:property_manager_frontend/services/auth_service.dart';
-import 'package:property_manager_frontend/core/config.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -24,16 +20,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _passwordController = TextEditingController();  // required for non-tenant
 
   final _propertyCodeController = TextEditingController(); // tenant-only
-  final _unitLabelController = TextEditingController();    // tenant-only (label like A3, B1)
+  final _unitLabelController = TextEditingController();    // tenant-only (A2, Simba, Nyayo...)
 
   String _selectedRole = 'tenant';
   bool _loading = false;
 
   final List<String> _roles = ['tenant', 'landlord', 'manager', 'admin'];
-
-  // Autocomplete data
-  List<Map<String, dynamic>> _unitOptions = [];
-  int? _chosenUnitId;
 
   @override
   void dispose() {
@@ -47,56 +39,17 @@ class _RegisterScreenState extends State<RegisterScreen> {
     super.dispose();
   }
 
-  Future<void> _fetchUnits() async {
-    final code = _propertyCodeController.text.trim();
-    if (code.isEmpty) {
-      setState(() {
-        _unitOptions = [];
-        _chosenUnitId = null;
-      });
-      return;
-    }
-
-    try {
-      final url = Uri.parse('${AppConfig.apiBaseUrl}/properties/by-code/$code/units');
-      final res = await http.get(url, headers: {"Content-Type": "application/json"});
-      if (res.statusCode == 200) {
-        final list = jsonDecode(res.body);
-        if (list is List) {
-          setState(() {
-            _unitOptions = list.cast<Map<String, dynamic>>();
-          });
-        }
-      } else {
-        setState(() {
-          _unitOptions = [];
-          _chosenUnitId = null;
-        });
-      }
-    } catch (e) {
-      setState(() {
-        _unitOptions = [];
-        _chosenUnitId = null;
-      });
-    }
-  }
-
   Future<void> _register() async {
     if (!_formKey.currentState!.validate()) return;
-
-    // If tenant, ensure we either matched a unit option or fallback to number parsing error-less path
-    if (_selectedRole == 'tenant' && _chosenUnitId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Select a valid unit from suggestions.')),
-      );
-      return;
-    }
 
     setState(() => _loading = true);
 
     try {
       final email = _emailController.text.trim().isEmpty ? null : _emailController.text.trim();
       final idNumber = _idController.text.trim().isEmpty ? null : _idController.text.trim();
+
+      final propertyCode = _selectedRole == 'tenant' ? _propertyCodeController.text.trim() : null;
+      final unitNumber = _selectedRole == 'tenant' ? _unitLabelController.text.trim() : null;
 
       // 1) Register
       await AuthService.registerUser(
@@ -108,8 +61,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
             ? (_passwordController.text.trim().isEmpty ? null : _passwordController.text.trim())
             : _passwordController.text.trim(),
         role: _selectedRole,
-        propertyCode: _selectedRole == 'tenant' ? _propertyCodeController.text.trim() : null,
-        unitId: _selectedRole == 'tenant' ? _chosenUnitId : null, // <-- from autocomplete
+        propertyCode: propertyCode,
+        unitNumber: unitNumber, // ✅ manual unit entry
       );
 
       // 2) Auto-login
@@ -123,7 +76,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
       if (!mounted) return;
 
-      // 3) Route by role
       final role = (login['role'] ?? _selectedRole).toString();
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Registration complete!')),
@@ -190,21 +142,16 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       ),
                       const SizedBox(height: 20),
 
-                      // Required
                       _requiredField(_nameController, "Full Name", Icons.person),
                       const SizedBox(height: 10),
                       _requiredField(_phoneController, "Phone Number", Icons.phone),
 
                       const SizedBox(height: 10),
-
-                      // Optional
                       _optionalField(_emailController, "Email (optional)", Icons.email),
                       const SizedBox(height: 10),
                       _optionalField(_idController, "National ID (optional)", Icons.badge),
 
                       const SizedBox(height: 10),
-
-                      // Password (required for non-tenant; optional for tenant)
                       TextFormField(
                         controller: _passwordController,
                         obscureText: true,
@@ -214,9 +161,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                           border: OutlineInputBorder(),
                         ),
                         validator: (v) {
-                          if (_selectedRole == 'tenant') {
-                            return null; // optional
-                          }
+                          if (_selectedRole == 'tenant') return null; // optional for tenant
                           if (v == null || v.trim().isEmpty) {
                             return 'Password is required for $_selectedRole';
                           }
@@ -225,8 +170,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       ),
 
                       const SizedBox(height: 10),
-
-                      // Role selector
                       DropdownButtonFormField<String>(
                         value: _selectedRole,
                         items: _roles
@@ -241,8 +184,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
                             if (_selectedRole != 'tenant') {
                               _propertyCodeController.clear();
                               _unitLabelController.clear();
-                              _unitOptions = [];
-                              _chosenUnitId = null;
                             }
                           });
                         },
@@ -259,82 +200,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
                           _propertyCodeController,
                           "Property Code",
                           Icons.home_work_outlined,
-                          onChanged: (_) => _fetchUnits(),
-                          onFieldSubmitted: (_) => _fetchUnits(),
                         ),
                         const SizedBox(height: 10),
-
-                        // Autocomplete for Unit (label)
-                        RawAutocomplete<Map<String, dynamic>>(
-                          textEditingController: _unitLabelController,
-                          focusNode: FocusNode(),
-                          optionsBuilder: (TextEditingValue tv) {
-                            final q = tv.text.toLowerCase().trim();
-                            if (q.isEmpty) return _unitOptions;
-                            return _unitOptions.where((m) {
-                              final label = (m['label'] ?? '').toString().toLowerCase();
-                              return label.contains(q);
-                            });
-                          },
-                          displayStringForOption: (m) => (m['label'] ?? '').toString(),
-                          fieldViewBuilder: (context, controller, focusNode, onFieldSubmitted) {
-                            return TextFormField(
-                              controller: controller,
-                              focusNode: focusNode,
-                              decoration: const InputDecoration(
-                                labelText: 'Unit (e.g., A3, B1)',
-                                prefixIcon: Icon(Icons.apartment),
-                                border: OutlineInputBorder(),
-                              ),
-                              validator: (v) {
-                                if (v == null || v.trim().isEmpty) return "Unit is required";
-                                // ensure selection maps to an option
-                                final match = _unitOptions.firstWhere(
-                                  (m) => (m['label'] ?? '').toString().trim().toLowerCase() == v.trim().toLowerCase(),
-                                  orElse: () => {},
-                                );
-                                if (match.isEmpty) return "Pick a valid unit from suggestions";
-                                return null;
-                              },
-                              onChanged: (v) {
-                                final match = _unitOptions.firstWhere(
-                                  (m) => (m['label'] ?? '').toString().trim().toLowerCase() == v.trim().toLowerCase(),
-                                  orElse: () => {},
-                                );
-                                setState(() {
-                                  _chosenUnitId = match.isEmpty ? null : (match['id'] as num?)?.toInt();
-                                });
-                              },
-                            );
-                          },
-                          optionsViewBuilder: (context, onSelected, options) {
-                            return Align(
-                              alignment: Alignment.topLeft,
-                              child: Material(
-                                elevation: 4,
-                                child: SizedBox(
-                                  width: 360,
-                                  child: ListView.builder(
-                                    padding: EdgeInsets.zero,
-                                    shrinkWrap: true,
-                                    itemCount: options.length,
-                                    itemBuilder: (_, i) {
-                                      final m = options.elementAt(i);
-                                      final label = (m['label'] ?? '').toString();
-                                      return ListTile(
-                                        title: Text(label),
-                                        onTap: () {
-                                          onSelected(m);
-                                          _unitLabelController.text = label;
-                                          setState(() => _chosenUnitId = (m['id'] as num).toInt());
-                                        },
-                                      );
-                                    },
-                                  ),
-                                ),
-                              ),
-                            );
-                          },
+                        _requiredField(
+                          _unitLabelController,
+                          "Unit Name/Number (e.g., A2, Simba, Nyayo)",
+                          Icons.apartment,
                         ),
                       ],
 
@@ -368,8 +239,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
       ),
     );
   }
-
-  // ---------- Field helpers ----------
 
   Widget _requiredField(
     TextEditingController c,
