@@ -5,19 +5,12 @@ import 'package:flutter/services.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:property_manager_frontend/utils/token_manager.dart';
 
-/// A responsive dashboard shell:
-/// - ≥800px: left sidebar (collapsible) + content.
-/// - <800px: hamburger Drawer + full-width content.
-/// Optional property pills: [propertyCode] (copyable) and [unitsCount].
 class BaseDashboard extends StatefulWidget {
   final String title;
   final Widget body;
   final Widget? floatingActionButton;
 
-  /// Optional: show a copyable property code chip in the AppBar row.
   final String? propertyCode;
-
-  /// Optional: show units count chip in the AppBar row.
   final int? unitsCount;
 
   const BaseDashboard({
@@ -82,9 +75,8 @@ class _BaseDashboardState extends State<BaseDashboard> {
         final isWide = constraints.maxWidth >= 800.0;
         final sideWidth = _collapsed ? 72.0 : 248.0;
 
-        // Common AppBar actions
         final actions = <Widget>[
-          if (isWide) // collapse/expand only makes sense when the side panel is visible
+          if (isWide)
             IconButton(
               tooltip: _collapsed ? 'Expand menu' : 'Collapse menu',
               icon: Icon(_collapsed ? LucideIcons.panelRightOpen : LucideIcons.panelLeftClose),
@@ -99,7 +91,6 @@ class _BaseDashboardState extends State<BaseDashboard> {
           const SizedBox(width: 8),
         ];
 
-        // Title row with optional pills
         final titleRow = LayoutBuilder(
           builder: (ctx, c) {
             final narrowTitle = c.maxWidth < 420;
@@ -119,27 +110,17 @@ class _BaseDashboardState extends State<BaseDashboard> {
                 ),
             ];
 
-            final title = Text(
-              widget.title,
-              overflow: TextOverflow.ellipsis,
-            );
+            final title = Text(widget.title, overflow: TextOverflow.ellipsis);
 
-            if (pills.isEmpty) {
-              return title;
-            }
+            if (pills.isEmpty) return title;
 
             if (narrowTitle) {
-              // Stack on two lines for tiny widths
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   title,
                   const SizedBox(height: 6),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: pills,
-                  ),
+                  Wrap(spacing: 8, runSpacing: 8, children: pills),
                 ],
               );
             }
@@ -148,18 +129,13 @@ class _BaseDashboardState extends State<BaseDashboard> {
               children: [
                 Expanded(child: title),
                 const SizedBox(width: 8),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: pills,
-                ),
+                Wrap(spacing: 8, runSpacing: 8, children: pills),
               ],
             );
           },
         );
 
         if (isWide) {
-          // ---------- Wide layout: persistent side panel ----------
           return Scaffold(
             appBar: AppBar(title: titleRow, actions: actions),
             body: Row(
@@ -178,10 +154,7 @@ class _BaseDashboardState extends State<BaseDashboard> {
                 Expanded(
                   child: Container(
                     color: theme.colorScheme.surfaceContainerLowest,
-                    child: SafeArea(
-                      top: false,
-                      child: widget.body,
-                    ),
+                    child: SafeArea(top: false, child: widget.body),
                   ),
                 ),
               ],
@@ -190,11 +163,9 @@ class _BaseDashboardState extends State<BaseDashboard> {
           );
         }
 
-        // ---------- Narrow layout: Drawer + full-width content ----------
         return Scaffold(
           appBar: AppBar(
             title: titleRow,
-            // On narrow screens, show a hamburger that opens the Drawer
             leading: Builder(
               builder: (ctx) => IconButton(
                 icon: const Icon(LucideIcons.menu),
@@ -202,19 +173,14 @@ class _BaseDashboardState extends State<BaseDashboard> {
                 onPressed: () => Scaffold.of(ctx).openDrawer(),
               ),
             ),
-            actions: actions.where((w) => w is! IconButton || (w as IconButton).tooltip != 'Expand menu').toList(),
+            actions: actions,
           ),
           drawer: Drawer(
-            child: SafeArea(
-              child: _SideNav(collapsed: false),
-            ),
+            child: SafeArea(child: _SideNav(collapsed: false)),
           ),
           body: Container(
             color: theme.colorScheme.surfaceContainerLowest,
-            child: SafeArea(
-              top: false,
-              child: widget.body,
-            ),
+            child: SafeArea(top: false, child: widget.body),
           ),
           floatingActionButton: widget.floatingActionButton,
         );
@@ -223,23 +189,73 @@ class _BaseDashboardState extends State<BaseDashboard> {
   }
 }
 
-class _SideNav extends StatelessWidget {
+class _SideNav extends StatefulWidget {
   final bool collapsed;
   const _SideNav({required this.collapsed});
 
   @override
+  State<_SideNav> createState() => _SideNavState();
+}
+
+class _SideNavState extends State<_SideNav> {
+  String? _role;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadRole();
+  }
+
+  Future<void> _loadRole() async {
+    final r = await TokenManager.currentRole();
+    if (!mounted) return;
+    setState(() => _role = r);
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final role = _role;
+
+    // Default while loading role
+    if (role == null) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
     final entries = <_NavItem>[
       _NavItem(
         icon: LucideIcons.layoutDashboard,
         label: 'Overview',
         onTap: () => Navigator.pushReplacementNamed(context, '/dashboard'),
       ),
-      _NavItem(
-        icon: LucideIcons.building2,
-        label: 'Properties',
-        onTap: () => Navigator.pushReplacementNamed(context, '/dashboard'),
-      ),
+
+      // Manager nav
+      if (role == 'manager') ...[
+        _NavItem(
+          icon: LucideIcons.building2,
+          label: 'Properties',
+          onTap: () => Navigator.pushReplacementNamed(context, '/dashboard'),
+        ),
+        _NavItem(
+          icon: LucideIcons.grid,
+          label: 'Units',
+          onTap: () => Navigator.pushReplacementNamed(context, '/dashboard'),
+        ),
+        _NavItem(
+          icon: LucideIcons.wrench,
+          label: 'Maintenance',
+          onTap: () => Navigator.pushReplacementNamed(context, '/dashboard'),
+        ),
+      ],
+
+      // Landlord nav (you can adjust later)
+      if (role == 'landlord') ...[
+        _NavItem(
+          icon: LucideIcons.building2,
+          label: 'Properties',
+          onTap: () => Navigator.pushReplacementNamed(context, '/dashboard'),
+        ),
+      ],
+
       _NavItem(
         icon: LucideIcons.settings,
         label: 'Settings',
@@ -251,7 +267,7 @@ class _SideNav extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 8),
       children: [
         const SizedBox(height: 8),
-        ...entries.map((e) => _SideTile(item: e, collapsed: collapsed)),
+        ...entries.map((e) => _SideTile(item: e, collapsed: widget.collapsed)),
       ],
     );
   }
@@ -296,7 +312,6 @@ class _SideTile extends StatelessWidget {
   }
 }
 
-/// Small informative pill "Label: Value"
 class _InfoPill extends StatelessWidget {
   final IconData icon;
   final String label;
@@ -331,7 +346,6 @@ class _InfoPill extends StatelessWidget {
   }
 }
 
-/// Copyable pill for property code
 class _CopyablePill extends StatelessWidget {
   final IconData icon;
   final String label;

@@ -1,3 +1,4 @@
+// lib/main.dart
 import 'package:flutter/material.dart';
 import 'package:property_manager_frontend/screens/landlord/landlord_payouts.dart';
 import 'package:provider/provider.dart';
@@ -17,6 +18,7 @@ import 'package:property_manager_frontend/theme/app_theme.dart';
 import 'package:property_manager_frontend/providers/theme_provider.dart';
 import 'package:property_manager_frontend/utils/token_manager.dart';
 import 'package:property_manager_frontend/screens/lease/lease_view.dart';
+import 'package:property_manager_frontend/screens/manager/manager_properties.dart';
 
 
 void main() {
@@ -76,6 +78,7 @@ class PropSmartApp extends StatelessWidget {
         '/tenant_dashboard': (_) => const DashboardShell(),
         '/landlord_payouts': (_) => const LandlordPayoutsScreen(),
         '/landlord_overview': (_) => const LandlordOverview(),
+        '/manager_properties': (_) => const ManagerPropertiesScreen(),
         // ✅ Landlord’s property units page; accepts either an int or {propertyId: int}
         '/landlord_property_units': (context) {
           final args = ModalRoute.of(context)!.settings.arguments;

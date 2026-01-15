@@ -211,4 +211,24 @@ class PropertyService {
     if (res.statusCode == 404) return null; // endpoint not deployed or property missing
     throw Exception('Failed to load assigned manager: ${_errMsg(res)}');
   }
+    /// Manager: list properties assigned to this manager
+  /// GET /properties/manager/{manager_id}
+  static Future<List<dynamic>> getPropertiesByManager(int managerId) async {
+    final headers = await TokenManager.authHeaders();
+    final url = Uri.parse('${AppConfig.apiBaseUrl}/properties/manager/$managerId');
+
+    print('[PropertyService] GET $url');
+    final res = await http.get(url, headers: {
+      'Content-Type': 'application/json',
+      ...headers,
+    });
+
+    print('[PropertyService] ← ${res.statusCode} ${res.body}');
+    if (res.statusCode == 200) {
+      return jsonDecode(res.body) as List<dynamic>;
+    }
+    throw Exception('Failed to load manager properties: ${_errMsg(res)}');
+  }
+
 }
+

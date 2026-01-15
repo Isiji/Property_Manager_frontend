@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:property_manager_frontend/utils/token_manager.dart';
 import 'package:property_manager_frontend/screens/dashboard/base_dashboard.dart';
 import 'package:property_manager_frontend/screens/landlord/landlord_home.dart';
+import 'package:property_manager_frontend/screens/manager/manager_home.dart';
 
 class DashboardShell extends StatefulWidget {
   const DashboardShell({super.key});
@@ -30,7 +31,6 @@ class _DashboardShellState extends State<DashboardShell> {
 
   @override
   Widget build(BuildContext context) {
-    // Switch content based on role. BaseDashboard now provides the Logout button on AppBar.
     Widget content;
     String title;
 
@@ -39,18 +39,22 @@ class _DashboardShellState extends State<DashboardShell> {
         title = 'Landlord';
         content = const LandlordHome();
         break;
+
       case 'manager':
         title = 'Manager';
-        content = const Center(child: Text('Manager dashboard coming soon'));
+        content = const ManagerHome();
         break;
+
       case 'admin':
         title = 'Admin';
         content = const Center(child: Text('Admin dashboard coming soon'));
         break;
+
       case 'tenant':
         title = 'Tenant';
         content = const Center(child: Text('Tenant dashboard coming soon'));
         break;
+
       default:
         title = 'Dashboard';
         content = const Center(child: CircularProgressIndicator());
