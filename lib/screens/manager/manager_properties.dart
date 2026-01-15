@@ -1,4 +1,5 @@
 // ignore_for_file: avoid_print, use_build_context_synchronously
+// lib/screens/manager/manager_properties.dart
 
 import 'package:flutter/material.dart';
 import 'package:lucide_icons/lucide_icons.dart';
@@ -70,6 +71,20 @@ class _ManagerPropertiesScreenState extends State<ManagerPropertiesScreen> {
       final code = (p['property_code'] ?? '').toString().toLowerCase();
       return name.contains(s) || addr.contains(s) || code.contains(s);
     }).toList();
+  }
+
+  void _openHub({
+    required int propertyId,
+    required String propertyCode,
+  }) {
+    Navigator.pushNamed(
+      context,
+      '/manager_property_hub',
+      arguments: {
+        'propertyId': propertyId,
+        'propertyCode': propertyCode,
+      },
+    );
   }
 
   @override
@@ -154,7 +169,10 @@ class _ManagerPropertiesScreenState extends State<ManagerPropertiesScreen> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(name, style: t.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w900)),
+                                Text(
+                                  name,
+                                  style: t.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w900),
+                                ),
                                 const SizedBox(height: 4),
                                 Text(
                                   addr,
@@ -164,6 +182,13 @@ class _ManagerPropertiesScreenState extends State<ManagerPropertiesScreen> {
                                 ),
                               ],
                             ),
+                          ),
+
+                          // ✅ quick open
+                          IconButton(
+                            tooltip: 'Open hub',
+                            icon: const Icon(LucideIcons.layoutDashboard),
+                            onPressed: pid == 0 ? null : () => _openHub(propertyId: pid, propertyCode: code),
                           ),
                         ],
                       ),
@@ -177,19 +202,26 @@ class _ManagerPropertiesScreenState extends State<ManagerPropertiesScreen> {
                         ],
                       ),
                       const SizedBox(height: 12),
+
                       Wrap(
                         spacing: 10,
                         runSpacing: 10,
                         children: [
+                          FilledButton.icon(
+                            onPressed: pid == 0 ? null : () => _openHub(propertyId: pid, propertyCode: code),
+                            icon: const Icon(LucideIcons.layoutDashboard, size: 18),
+                            label: const Text('Open'),
+                          ),
                           OutlinedButton.icon(
-                            onPressed: () {
-                              // Reuse landlord units screen for now (same endpoint /with-units-detailed)
-                              Navigator.pushNamed(
-                                context,
-                                '/landlord_property_units',
-                                arguments: {'propertyId': pid},
-                              );
-                            },
+                            onPressed: pid == 0
+                                ? null
+                                : () {
+                                    Navigator.pushNamed(
+                                      context,
+                                      '/landlord_property_units',
+                                      arguments: {'propertyId': pid},
+                                    );
+                                  },
                             icon: const Icon(LucideIcons.grid, size: 18),
                             label: const Text('Units'),
                           ),
@@ -203,11 +235,7 @@ class _ManagerPropertiesScreenState extends State<ManagerPropertiesScreen> {
                             label: const Text('Tenants'),
                           ),
                           OutlinedButton.icon(
-                            onPressed: () {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Maintenance screen coming next.')),
-                              );
-                            },
+                            onPressed: () => Navigator.pushNamed(context, '/manager_maintenance_inbox'),
                             icon: const Icon(LucideIcons.wrench, size: 18),
                             label: const Text('Maintenance'),
                           ),

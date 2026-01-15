@@ -1,25 +1,27 @@
 // lib/main.dart
 import 'package:flutter/material.dart';
-import 'package:property_manager_frontend/screens/landlord/landlord_payouts.dart';
 import 'package:provider/provider.dart';
+
+import 'package:property_manager_frontend/providers/theme_provider.dart';
+import 'package:property_manager_frontend/theme/app_theme.dart';
+import 'package:property_manager_frontend/utils/token_manager.dart';
 
 import 'package:property_manager_frontend/screens/auth/login_screen.dart';
 import 'package:property_manager_frontend/screens/auth/register_screen.dart';
 import 'package:property_manager_frontend/screens/settings/settings_screen.dart';
 import 'package:property_manager_frontend/screens/tenant/tenant_home.dart';
-// Shell that hosts role-specific content (topbar + collapsible side nav)
+
 import 'package:property_manager_frontend/screens/dashboard/dashboard_shell.dart';
+
 import 'package:property_manager_frontend/screens/common/maintenance_inbox.dart';
-// Landlord detail screen for a property’s units
-import 'package:property_manager_frontend/screens/landlord/landlord_property_units.dart';
-import 'package:property_manager_frontend/screens/landlord/landlord_overview.dart';
-
-import 'package:property_manager_frontend/theme/app_theme.dart';
-import 'package:property_manager_frontend/providers/theme_provider.dart';
-import 'package:property_manager_frontend/utils/token_manager.dart';
 import 'package:property_manager_frontend/screens/lease/lease_view.dart';
-import 'package:property_manager_frontend/screens/manager/manager_properties.dart';
 
+import 'package:property_manager_frontend/screens/landlord/landlord_payouts.dart';
+import 'package:property_manager_frontend/screens/landlord/landlord_overview.dart';
+import 'package:property_manager_frontend/screens/landlord/landlord_property_units.dart';
+
+import 'package:property_manager_frontend/screens/manager/manager_properties.dart';
+import 'package:property_manager_frontend/screens/manager/manager_property_hub.dart';
 
 void main() {
   runApp(
@@ -66,22 +68,61 @@ class PropSmartApp extends StatelessWidget {
         '/register': (_) => const RegisterScreen(),
         '/settings': (_) => const SettingsScreen(),
         '/tenant_home': (_) => const TenantHome(),
+
         // ✅ One common dashboard shell
         '/dashboard': (_) => const DashboardShell(),
-        '/lease_view': (ctx) => const LeaseViewScreen(),
-        '/landlord_maintenance_inbox': (ctx) => const LandlordMaintenanceInbox(),
-        '/manager_maintenance_inbox': (ctx) => const LandlordMaintenanceInbox(forManager: true),
+
+        '/lease_view': (_) => const LeaseViewScreen(),
+
+        '/landlord_maintenance_inbox': (_) => const LandlordMaintenanceInbox(),
+        '/manager_maintenance_inbox': (_) => const LandlordMaintenanceInbox(forManager: true),
+
         // ✅ Route aliases (old routes still work)
         '/landlord_dashboard': (_) => const DashboardShell(),
         '/manager_dashboard': (_) => const DashboardShell(),
         '/admin_dashboard': (_) => const DashboardShell(),
         '/tenant_dashboard': (_) => const DashboardShell(),
+
         '/landlord_payouts': (_) => const LandlordPayoutsScreen(),
         '/landlord_overview': (_) => const LandlordOverview(),
+
         '/manager_properties': (_) => const ManagerPropertiesScreen(),
-        // ✅ Landlord’s property units page; accepts either an int or {propertyId: int}
+
+        // ✅ Manager Property Hub
+        '/manager_property_hub': (context) {
+          final args = ModalRoute.of(context)!.settings.arguments;
+
+          int propertyId;
+          String? propertyCode;
+
+          if (args is int) {
+            propertyId = args;
+          } else if (args is Map) {
+            final pid = args['propertyId'];
+            if (pid is int) {
+              propertyId = pid;
+              propertyCode = args['propertyCode']?.toString();
+            } else {
+              throw ArgumentError(
+                'Route /manager_property_hub requires {propertyId:int, propertyCode?:String}',
+              );
+            }
+          } else {
+            throw ArgumentError(
+              'Route /manager_property_hub requires int propertyId or {propertyId:int, propertyCode?:String}',
+            );
+          }
+
+          return ManagerPropertyHubScreen(
+            propertyId: propertyId,
+            propertyCode: propertyCode,
+          );
+        },
+
+        // ✅ Landlord’s property units page; accepts either int or {propertyId:int}
         '/landlord_property_units': (context) {
           final args = ModalRoute.of(context)!.settings.arguments;
+
           int propertyId;
           if (args is int) {
             propertyId = args;
@@ -92,6 +133,7 @@ class PropSmartApp extends StatelessWidget {
               'Route /landlord_property_units requires an int propertyId or {propertyId: int}',
             );
           }
+
           return LandlordPropertyUnits(propertyId: propertyId);
         },
       },
@@ -122,15 +164,13 @@ class _LaunchDeciderState extends State<LaunchDecider> {
     if (!mounted) return;
 
     if (session != null && !session.isExpired) {
-      debugPrint(
-        '[LaunchDecider] Logged in as ${session.role} → Navigating to /dashboard',
-      );
+      debugPrint('[LaunchDecider] Logged in as ${session.role} → /dashboard');
       Navigator.of(context).pushReplacementNamed('/dashboard', arguments: {
         'role': session.role,
         'userId': session.userId,
       });
     } else {
-      debugPrint('[LaunchDecider] No active session → going to /login');
+      debugPrint('[LaunchDecider] No active session → /login');
       Navigator.of(context).pushReplacementNamed('/login');
     }
   }
