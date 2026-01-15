@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
 import 'package:property_manager_frontend/services/property_service.dart';
+import 'package:property_manager_frontend/services/landlord_service.dart';
 import 'package:property_manager_frontend/utils/token_manager.dart';
 import 'package:property_manager_frontend/widgets/notification_bell.dart';
 import 'package:property_manager_frontend/widgets/maintenance_inbox.dart';
@@ -22,6 +23,9 @@ class _LandlordHomeState extends State<LandlordHome> {
   List<dynamic> _properties = [];
   int? _landlordId;
 
+  // ✅ Landlord name (visible in header)
+  String _landlordName = '—';
+
   final _formKey = GlobalKey<FormState>();
   final _nameCtrl = TextEditingController();
   final _addrCtrl = TextEditingController();
@@ -36,6 +40,11 @@ class _LandlordHomeState extends State<LandlordHome> {
   final Map<int, int> _unitCounts = {};
   /// Tracks in-flight fetches so we don’t duplicate calls
   final Map<int, Future<void>> _unitCountLoading = {};
+
+  /// Cache assigned manager per property id (single manager)
+  /// propertyId -> manager map or null
+  final Map<int, Map<String, dynamic>?> _assignedManager = {};
+  final Map<int, Future<void>> _assignedManagerLoading = {};
 
   @override
   void initState() {
@@ -67,7 +76,12 @@ class _LandlordHomeState extends State<LandlordHome> {
         Navigator.of(context).pushNamedAndRemoveUntil('/login', (_) => false);
         return;
       }
+
       _landlordId = id;
+
+      // ✅ Load landlord name from DB
+      await _loadLandlordName();
+
       await _loadProperties();
     } catch (e) {
       print('💥 init error: $e');
@@ -80,6 +94,20 @@ class _LandlordHomeState extends State<LandlordHome> {
     }
   }
 
+  Future<void> _loadLandlordName() async {
+    if (_landlordId == null) return;
+    try {
+      final ll = await LandlordService.getLandlord(_landlordId!);
+      final name = (ll['name'] ?? '').toString().trim();
+      if (!mounted) return;
+      setState(() => _landlordName = name.isEmpty ? '—' : name);
+    } catch (e) {
+      print('[LandlordHome] landlord name load failed: $e');
+      if (!mounted) return;
+      setState(() => _landlordName = '—');
+    }
+  }
+
   Future<void> _loadProperties() async {
     if (_landlordId == null) return;
     try {
@@ -87,8 +115,8 @@ class _LandlordHomeState extends State<LandlordHome> {
       print('➡️ GET properties for landlordId=$_landlordId');
       final data = await PropertyService.getPropertiesByLandlord(_landlordId!);
       print('✅ properties loaded: ${data.length}');
+      if (!mounted) return;
       setState(() => _properties = data);
-      // Lazy fetch unit counts per card, see _ensureUnitCount.
     } catch (e) {
       print('💥 load properties error: $e');
       if (!mounted) return;
@@ -132,8 +160,8 @@ class _LandlordHomeState extends State<LandlordHome> {
   }
 
   Future<void> _openEdit(Map<String, dynamic> p) async {
-    _editNameCtrl.text = p['name'] ?? '';
-    _editAddrCtrl.text = p['address'] ?? '';
+    _editNameCtrl.text = (p['name'] ?? '').toString();
+    _editAddrCtrl.text = (p['address'] ?? '').toString();
 
     await showDialog(
       context: context,
@@ -150,8 +178,7 @@ class _LandlordHomeState extends State<LandlordHome> {
                   labelText: 'Property name',
                   prefixIcon: Icon(LucideIcons.building2),
                 ),
-                validator: (v) =>
-                    (v == null || v.trim().isEmpty) ? 'Required' : null,
+                validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
               ),
               const SizedBox(height: 12),
               TextFormField(
@@ -160,8 +187,7 @@ class _LandlordHomeState extends State<LandlordHome> {
                   labelText: 'Address',
                   prefixIcon: Icon(LucideIcons.mapPin),
                 ),
-                validator: (v) =>
-                    (v == null || v.trim().isEmpty) ? 'Required' : null,
+                validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
               ),
             ],
           ),
@@ -172,9 +198,10 @@ class _LandlordHomeState extends State<LandlordHome> {
             onPressed: () async {
               if (!_editFormKey.currentState!.validate()) return;
               try {
-                print('✏️ update propertyId=${p['id']}');
+                final pid = (p['id'] as num).toInt();
+                print('✏️ update propertyId=$pid');
                 await PropertyService.updateProperty(
-                  propertyId: p['id'] as int,
+                  propertyId: pid,
                   name: _editNameCtrl.text.trim(),
                   address: _editAddrCtrl.text.trim(),
                 );
@@ -224,10 +251,14 @@ class _LandlordHomeState extends State<LandlordHome> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Property deleted')),
       );
+
       setState(() {
         _unitCounts.remove(id);
         _unitCountLoading.remove(id);
+        _assignedManager.remove(id);
+        _assignedManagerLoading.remove(id);
       });
+
       await _loadProperties();
     } catch (e) {
       print('💥 delete error: $e');
@@ -255,14 +286,16 @@ class _LandlordHomeState extends State<LandlordHome> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$label copied')));
   }
 
-  /// Lazy-load unit counts from /properties/{id}/with-units-detailed
+  // ---------------------------
+  // Unit counts
+  // ---------------------------
   void _ensureUnitCount(int propertyId) {
-    if (_unitCounts.containsKey(propertyId) || _unitCountLoading.containsKey(propertyId)) return;
+    if (_unitCounts.containsKey(propertyId)) return;
+    if (_unitCountLoading.containsKey(propertyId)) return;
+
     final fut = _loadUnitCount(propertyId);
     _unitCountLoading[propertyId] = fut;
-    fut.whenComplete(() {
-      _unitCountLoading.remove(propertyId);
-    });
+    fut.whenComplete(() => _unitCountLoading.remove(propertyId));
   }
 
   Future<void> _loadUnitCount(int propertyId) async {
@@ -273,17 +306,105 @@ class _LandlordHomeState extends State<LandlordHome> {
       setState(() => _unitCounts[propertyId] = total);
     } catch (e) {
       print('[unit-count] failed for $propertyId: $e');
-      // Leave it unset; card will show “—”
     }
   }
 
+  // ---------------------------
+  // Assigned Property Manager (single)
+  // ---------------------------
+  void _ensureAssignedManager(int propertyId) {
+    if (_assignedManager.containsKey(propertyId)) return;
+    if (_assignedManagerLoading.containsKey(propertyId)) return;
+
+    final fut = _loadAssignedManager(propertyId);
+    _assignedManagerLoading[propertyId] = fut;
+    fut.whenComplete(() => _assignedManagerLoading.remove(propertyId));
+  }
+
+  Future<void> _loadAssignedManager(int propertyId) async {
+    try {
+      // If you have /properties/{id}/property-manager it will work.
+      // If not, this will just set null safely.
+      final mgr = await PropertyService.getAssignedPropertyManager(propertyId);
+      if (!mounted) return;
+      setState(() => _assignedManager[propertyId] = mgr);
+    } catch (e) {
+      print('[assigned-manager] failed for $propertyId: $e');
+      if (!mounted) return;
+      setState(() => _assignedManager[propertyId] = null);
+    }
+  }
+
+  Future<void> _openAssignManagerDialog(int propertyId) async {
+    final selected = await showDialog<Map<String, dynamic>?>(
+      context: context,
+      builder: (_) => _AssignPropertyManagerDialog(
+        searchFn: PropertyService.searchPropertyManagers,
+      ),
+    );
+
+    if (selected == null) return;
+
+    try {
+      final managerId = (selected['id'] as num).toInt();
+      await PropertyService.assignPropertyManager(propertyId: propertyId, managerId: managerId);
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Property manager assigned: ${selected['name']}')),
+      );
+
+      setState(() => _assignedManager[propertyId] = selected);
+    } catch (e) {
+      print('[assign-manager] failed: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to assign property manager: $e')),
+      );
+    }
+  }
+
+  Future<void> _unassignManager(int propertyId) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Unassign Property Manager'),
+        content: const Text('Remove the current property manager from this property?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Unassign')),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+
+    try {
+      await PropertyService.assignPropertyManager(propertyId: propertyId, managerId: null);
+      if (!mounted) return;
+      setState(() => _assignedManager[propertyId] = null);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Property manager unassigned')),
+      );
+    } catch (e) {
+      print('[unassign-manager] failed: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to unassign property manager: $e')),
+      );
+    }
+  }
+
+  // ---------------------------
+  // UI
+  // ---------------------------
   @override
   Widget build(BuildContext context) {
     final list = _filtered;
+    final t = Theme.of(context);
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Landlord'),
+        title: Text(_landlordName.trim().isEmpty ? '—' : _landlordName), // ✅ real landlord name
         actions: [
           IconButton(
             tooltip: 'Maintenance Inbox',
@@ -299,7 +420,10 @@ class _LandlordHomeState extends State<LandlordHome> {
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: _loadProperties,
+        onPressed: () async {
+          await _loadLandlordName();
+          await _loadProperties();
+        },
         icon: const Icon(Icons.refresh_rounded),
         label: const Text('Refresh'),
       ),
@@ -311,8 +435,56 @@ class _LandlordHomeState extends State<LandlordHome> {
           return ListView(
             padding: const EdgeInsets.only(bottom: 24),
             children: [
+              // header card
+              Container(
+                margin: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(14),
+                  color: t.colorScheme.surface,
+                  border: Border.all(color: t.dividerColor.withOpacity(.18)),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(.05),
+                      blurRadius: 16,
+                      offset: const Offset(0, 10),
+                    ),
+                  ],
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 46,
+                      height: 46,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: t.colorScheme.primary.withOpacity(.12),
+                      ),
+                      child: Icon(LucideIcons.user, color: t.colorScheme.primary),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Landlord', style: t.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w900)),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Name: $_landlordName',
+                            style: t.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w700),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
               _addPropertyPanel(isNarrow: isNarrow),
               _searchBar(),
+
               if (_loading)
                 const Padding(
                   padding: EdgeInsets.all(32),
@@ -384,7 +556,6 @@ class _LandlordHomeState extends State<LandlordHome> {
                 ],
               ),
               const SizedBox(height: 12),
-
               if (isNarrow)
                 Column(
                   children: [
@@ -438,7 +609,6 @@ class _LandlordHomeState extends State<LandlordHome> {
                   ],
                 ),
               const SizedBox(height: 12),
-
               Align(
                 alignment: Alignment.centerRight,
                 child: ElevatedButton.icon(
@@ -455,14 +625,16 @@ class _LandlordHomeState extends State<LandlordHome> {
   }
 
   Widget _propertyCard(Map<String, dynamic> p) {
-    final id = p['id'] as int;
-    final name = p['name'] ?? '';
-    final addr = p['address'] ?? '';
-    final code = p['property_code'] ?? '—';
+    final pid = (p['id'] as num).toInt();
+    final name = (p['name'] ?? '').toString();
+    final addr = (p['address'] ?? '').toString();
+    final code = (p['property_code'] ?? '—').toString();
 
-    // Kick off unit count fetch lazily.
-    if (!_unitCounts.containsKey(id) && !_unitCountLoading.containsKey(id)) {
-      Future.microtask(() => _ensureUnitCount(id));
+    if (!_unitCounts.containsKey(pid) && !_unitCountLoading.containsKey(pid)) {
+      Future.microtask(() => _ensureUnitCount(pid));
+    }
+    if (!_assignedManager.containsKey(pid) && !_assignedManagerLoading.containsKey(pid)) {
+      Future.microtask(() => _ensureAssignedManager(pid));
     }
 
     return LayoutBuilder(
@@ -475,26 +647,15 @@ class _LandlordHomeState extends State<LandlordHome> {
           height: 44,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            color: t.colorScheme.primary.withValues(alpha: 0.12),
+            color: t.colorScheme.primary.withOpacity(0.12),
           ),
           child: Icon(LucideIcons.home, color: t.colorScheme.primary),
         );
 
-        final title = Text(
-          name,
-          style: t.textTheme.titleMedium,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        );
+        final title = Text(name, style: t.textTheme.titleMedium, maxLines: 1, overflow: TextOverflow.ellipsis);
+        final subtitle = Text(addr, style: t.textTheme.bodyMedium, maxLines: 1, overflow: TextOverflow.ellipsis);
 
-        final subtitle = Text(
-          addr,
-          style: t.textTheme.bodyMedium,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        );
-
-        final unitCount = _unitCounts[id];
+        final unitCount = _unitCounts[pid];
         final unitBadge = Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
           decoration: BoxDecoration(
@@ -507,10 +668,7 @@ class _LandlordHomeState extends State<LandlordHome> {
             children: [
               const Icon(LucideIcons.grid, size: 16),
               const SizedBox(width: 6),
-              Text(
-                unitCount == null ? 'Units: —' : 'Units: $unitCount',
-                style: t.textTheme.labelMedium,
-              ),
+              Text(unitCount == null ? 'Units: —' : 'Units: $unitCount', style: t.textTheme.labelMedium),
             ],
           ),
         );
@@ -530,7 +688,7 @@ class _LandlordHomeState extends State<LandlordHome> {
               Text('Code: $code', style: t.textTheme.labelMedium, overflow: TextOverflow.ellipsis),
               const SizedBox(width: 6),
               InkWell(
-                onTap: code.toString().trim().isEmpty ? null : () => _copy('Property code', code.toString()),
+                onTap: code.trim().isEmpty ? null : () => _copy('Property code', code),
                 borderRadius: BorderRadius.circular(999),
                 child: const Padding(
                   padding: EdgeInsets.all(4.0),
@@ -541,10 +699,62 @@ class _LandlordHomeState extends State<LandlordHome> {
           ),
         );
 
-        final chips = Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [unitBadge, codeChip],
+        final chips = Wrap(spacing: 8, runSpacing: 8, children: [unitBadge, codeChip]);
+
+        // Property Managers panel (single assignment)
+        final mgr = _assignedManager[pid];
+        final mgrName = (mgr?['name'] ?? 'Not assigned').toString();
+        final mgrPhone = (mgr?['phone'] ?? '').toString();
+
+        final pmPanel = Container(
+          margin: const EdgeInsets.only(top: 10),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: t.colorScheme.surface,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: t.dividerColor.withOpacity(.22)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Icon(LucideIcons.users, size: 18),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Property Managers',
+                      style: t.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w900),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                mgr == null ? 'Not assigned' : '$mgrName${mgrPhone.trim().isEmpty ? '' : ' • $mgrPhone'}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  OutlinedButton.icon(
+                    onPressed: () => _openAssignManagerDialog(pid),
+                    icon: const Icon(LucideIcons.userPlus, size: 18),
+                    label: Text(mgr == null ? 'Assign' : 'Change'),
+                  ),
+                  if (mgr != null)
+                    FilledButton.icon(
+                      onPressed: () => _unassignManager(pid),
+                      icon: const Icon(LucideIcons.userMinus, size: 18),
+                      label: const Text('Unassign'),
+                    ),
+                ],
+              ),
+            ],
+          ),
         );
 
         final actions = Wrap(
@@ -555,10 +765,9 @@ class _LandlordHomeState extends State<LandlordHome> {
               icon: const Icon(LucideIcons.grid, size: 18),
               label: const Text('View Units'),
               onPressed: () {
-                print('🧭 Open units for propertyId=$id');
                 Navigator.of(context).pushNamed(
                   '/landlord_property_units',
-                  arguments: {'propertyId': id},
+                  arguments: {'propertyId': pid},
                 );
               },
             ),
@@ -571,7 +780,7 @@ class _LandlordHomeState extends State<LandlordHome> {
               icon: const Icon(LucideIcons.trash2, size: 18),
               style: FilledButton.styleFrom(backgroundColor: Colors.red),
               label: const Text('Delete'),
-              onPressed: () => _deleteProperty(id),
+              onPressed: () => _deleteProperty(pid),
             ),
           ],
         );
@@ -604,6 +813,7 @@ class _LandlordHomeState extends State<LandlordHome> {
                       ),
                       const SizedBox(height: 10),
                       chips,
+                      pmPanel,
                       const SizedBox(height: 10),
                       actions,
                     ],
@@ -622,6 +832,7 @@ class _LandlordHomeState extends State<LandlordHome> {
                             subtitle,
                             const SizedBox(height: 8),
                             chips,
+                            pmPanel,
                           ],
                         ),
                       ),
@@ -658,6 +869,9 @@ class _PropertyGrid extends StatelessWidget {
           return Column(children: [for (final p in items) cardBuilder(p)]);
         }
 
+        // ✅ Taller cards when we have property manager panel + buttons
+        final aspect = cols == 3 ? 1.35 : 1.25;
+
         return GridView.builder(
           itemCount: items.length,
           shrinkWrap: true,
@@ -666,11 +880,118 @@ class _PropertyGrid extends StatelessWidget {
             crossAxisCount: cols,
             crossAxisSpacing: gutter,
             mainAxisSpacing: gutter,
-            childAspectRatio: 1.8,
+            childAspectRatio: aspect,
           ),
           itemBuilder: (context, i) => cardBuilder(items[i]),
         );
       },
+    );
+  }
+}
+
+// ---------------------------
+// Dialog: Assign Property Manager
+// ---------------------------
+class _AssignPropertyManagerDialog extends StatefulWidget {
+  final Future<List<dynamic>> Function(String query) searchFn;
+  const _AssignPropertyManagerDialog({required this.searchFn});
+
+  @override
+  State<_AssignPropertyManagerDialog> createState() => _AssignPropertyManagerDialogState();
+}
+
+class _AssignPropertyManagerDialogState extends State<_AssignPropertyManagerDialog> {
+  final _qCtrl = TextEditingController();
+  bool _loading = false;
+  List<dynamic> _results = [];
+
+  @override
+  void dispose() {
+    _qCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _search() async {
+    final q = _qCtrl.text.trim();
+    if (q.isEmpty) {
+      setState(() => _results = []);
+      return;
+    }
+    setState(() => _loading = true);
+    try {
+      final res = await widget.searchFn(q);
+      if (!mounted) return;
+      setState(() => _results = res);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Search failed: $e')));
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Assign Property Manager'),
+      content: SizedBox(
+        width: 520,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: _qCtrl,
+              onSubmitted: (_) => _search(),
+              decoration: InputDecoration(
+                hintText: 'Search by name / phone / email…',
+                prefixIcon: const Icon(LucideIcons.search),
+                suffixIcon: IconButton(
+                  tooltip: 'Search',
+                  icon: const Icon(LucideIcons.arrowRightCircle),
+                  onPressed: _search,
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            if (_loading)
+              const Padding(
+                padding: EdgeInsets.all(16),
+                child: Center(child: CircularProgressIndicator()),
+              )
+            else if (_results.isEmpty)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 10),
+                child: Text('No results'),
+              )
+            else
+              SizedBox(
+                height: 280,
+                child: ListView.separated(
+                  itemCount: _results.length,
+                  separatorBuilder: (_, __) => const Divider(height: 1),
+                  itemBuilder: (_, i) {
+                    final raw = _results[i];
+                    final m = (raw is Map) ? Map<String, dynamic>.from(raw) : <String, dynamic>{};
+
+                    final name = (m['name'] ?? '').toString();
+                    final phone = (m['phone'] ?? '').toString();
+                    final email = (m['email'] ?? '').toString();
+
+                    return ListTile(
+                      leading: const Icon(LucideIcons.userCog),
+                      title: Text(name.isEmpty ? '—' : name),
+                      subtitle: Text([phone, email].where((x) => x.trim().isNotEmpty).join(' • ')),
+                      onTap: () => Navigator.pop(context, m),
+                    );
+                  },
+                ),
+              ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context, null), child: const Text('Cancel')),
+      ],
     );
   }
 }
