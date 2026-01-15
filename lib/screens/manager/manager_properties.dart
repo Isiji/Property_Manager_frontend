@@ -173,6 +173,25 @@ class _ManagerPropertiesScreenState extends State<ManagerPropertiesScreen> {
     }
   }
 
+  // ✅ STEP C: open payments screen for a property + selected period
+  void _openPayments({
+    required int propertyId,
+    required String period,
+    required String propertyName,
+    required String propertyCode,
+  }) {
+    Navigator.pushNamed(
+      context,
+      '/manager_payments',
+      arguments: {
+        'propertyId': propertyId,
+        'period': period,
+        'propertyName': propertyName,
+        'propertyCode': propertyCode,
+      },
+    );
+  }
+
   Widget _kv(ThemeData t, String k, String v) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
@@ -251,7 +270,9 @@ class _ManagerPropertiesScreenState extends State<ManagerPropertiesScreen> {
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          _managerPhone.trim().isEmpty ? 'Manager ID: ${_managerId ?? "—"}' : '$_managerPhone • ID: ${_managerId ?? "—"}',
+                          _managerPhone.trim().isEmpty
+                              ? 'Manager ID: ${_managerId ?? "—"}'
+                              : '$_managerPhone • ID: ${_managerId ?? "—"}',
                           style: t.textTheme.bodySmall?.copyWith(color: t.hintColor),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
@@ -288,7 +309,7 @@ class _ManagerPropertiesScreenState extends State<ManagerPropertiesScreen> {
                     '• Units: view all units for the property.\n'
                     '• Tenants: see tenants per unit (assigned/not assigned).\n'
                     '• Maintenance: view requests inbox.\n'
-                    '• Payments: pick a month and see payment status summary.',
+                    '• Payments: open the full payments screen for a selected month.',
                     style: t.textTheme.bodySmall?.copyWith(color: t.hintColor, height: 1.35),
                   ),
                 ],
@@ -340,7 +361,6 @@ class _ManagerPropertiesScreenState extends State<ManagerPropertiesScreen> {
               final period = _selectedPeriod[pid] ?? _lastMonths().first;
 
               // Preload payment status when card is built (safe / cached)
-              // only if card will show expansion later; this makes UI feel faster
               _ensurePaymentStatus(pid, period);
 
               final status = _paymentStatusCache[pid]?[period];
@@ -452,6 +472,20 @@ class _ManagerPropertiesScreenState extends State<ManagerPropertiesScreen> {
                             icon: const Icon(LucideIcons.wrench, size: 18),
                             label: const Text('Maintenance'),
                           ),
+
+                          // ✅ Step C: Open full Payments screen (per property + selected month)
+                          FilledButton.icon(
+                            onPressed: pid == 0
+                                ? null
+                                : () => _openPayments(
+                                      propertyId: pid,
+                                      period: period,
+                                      propertyName: name,
+                                      propertyCode: code,
+                                    ),
+                            icon: const Icon(LucideIcons.wallet, size: 18),
+                            label: const Text('Payments'),
+                          ),
                         ],
                       ),
 
@@ -494,7 +528,6 @@ class _ManagerPropertiesScreenState extends State<ManagerPropertiesScreen> {
                               ],
                             ),
                             const SizedBox(height: 10),
-
                             if (periodLoading)
                               const Padding(
                                 padding: EdgeInsets.symmetric(vertical: 8),

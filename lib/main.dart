@@ -11,6 +11,7 @@ import 'package:property_manager_frontend/screens/dashboard/dashboard_shell.dart
 import 'package:property_manager_frontend/screens/common/maintenance_inbox.dart';
 import 'package:property_manager_frontend/screens/landlord/landlord_property_units.dart';
 import 'package:property_manager_frontend/screens/landlord/landlord_overview.dart';
+import 'package:property_manager_frontend/screens/manager/manager_payments.dart';
 
 import 'package:property_manager_frontend/theme/app_theme.dart';
 import 'package:property_manager_frontend/providers/theme_provider.dart';
@@ -68,6 +69,20 @@ class PropSmartApp extends StatelessWidget {
 
         // ✅ One common dashboard shell
         '/dashboard': (_) => const DashboardShell(),
+        '/manager_payments': (context) {
+          final args = ModalRoute.of(context)!.settings.arguments;
+          if (args is Map && args['propertyId'] is int && args['period'] is String) {
+            return ManagerPaymentsScreen(
+              propertyId: args['propertyId'] as int,
+              initialPeriod: args['period'] as String,
+              propertyName: args['propertyName']?.toString(),
+              propertyCode: args['propertyCode']?.toString(),
+            );
+          }
+          throw ArgumentError(
+            'Route /manager_payments requires {propertyId:int, period:String, propertyName?:String, propertyCode?:String}',
+          );
+        },
 
         '/lease_view': (ctx) => const LeaseViewScreen(),
 
@@ -85,7 +100,7 @@ class PropSmartApp extends StatelessWidget {
 
         // ✅ Manager screens
         '/manager_properties': (_) => const ManagerPropertiesScreen(),
-
+        
         '/manager_tenants': (context) {
           final args = ModalRoute.of(context)!.settings.arguments;
           int propertyId;
