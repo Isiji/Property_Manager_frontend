@@ -323,9 +323,9 @@ class _LandlordHomeState extends State<LandlordHome> {
 
   Future<void> _loadAssignedManager(int propertyId) async {
     try {
-      // If you have /properties/{id}/property-manager it will work.
-      // If not, this will just set null safely.
       final mgr = await PropertyService.getAssignedPropertyManager(propertyId);
+
+      // ✅ normalize (mgr might be null; service already handles "null" responses)
       if (!mounted) return;
       setState(() => _assignedManager[propertyId] = mgr);
     } catch (e) {
@@ -404,7 +404,7 @@ class _LandlordHomeState extends State<LandlordHome> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(_landlordName.trim().isEmpty ? '—' : _landlordName), // ✅ real landlord name
+        title: Text(_landlordName.trim().isEmpty ? '—' : _landlordName),
         actions: [
           IconButton(
             tooltip: 'Maintenance Inbox',
@@ -673,6 +673,7 @@ class _LandlordHomeState extends State<LandlordHome> {
           ),
         );
 
+        // ✅ FIX: prevent overflow in this row
         final codeChip = Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
           decoration: BoxDecoration(
@@ -680,22 +681,31 @@ class _LandlordHomeState extends State<LandlordHome> {
             borderRadius: BorderRadius.circular(999),
             border: Border.all(color: t.dividerColor.withOpacity(.25)),
           ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(LucideIcons.keyRound, size: 16),
-              const SizedBox(width: 6),
-              Text('Code: $code', style: t.textTheme.labelMedium, overflow: TextOverflow.ellipsis),
-              const SizedBox(width: 6),
-              InkWell(
-                onTap: code.trim().isEmpty ? null : () => _copy('Property code', code),
-                borderRadius: BorderRadius.circular(999),
-                child: const Padding(
-                  padding: EdgeInsets.all(4.0),
-                  child: Icon(Icons.copy_rounded, size: 16),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 260),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(LucideIcons.keyRound, size: 16),
+                const SizedBox(width: 6),
+                Flexible(
+                  child: Text(
+                    'Code: $code',
+                    style: t.textTheme.labelMedium,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
-              ),
-            ],
+                const SizedBox(width: 6),
+                InkWell(
+                  onTap: code.trim().isEmpty ? null : () => _copy('Property code', code),
+                  borderRadius: BorderRadius.circular(999),
+                  child: const Padding(
+                    padding: EdgeInsets.all(4.0),
+                    child: Icon(Icons.copy_rounded, size: 16),
+                  ),
+                ),
+              ],
+            ),
           ),
         );
 
@@ -703,8 +713,12 @@ class _LandlordHomeState extends State<LandlordHome> {
 
         // Property Managers panel (single assignment)
         final mgr = _assignedManager[pid];
-        final mgrName = (mgr?['name'] ?? 'Not assigned').toString();
-        final mgrPhone = (mgr?['phone'] ?? '').toString();
+        final mgrName = (mgr?['name'] ?? '').toString().trim();
+        final mgrPhone = (mgr?['phone'] ?? '').toString().trim();
+
+        final mgrLine = mgr == null || (mgrName.isEmpty && mgrPhone.isEmpty)
+            ? 'Not assigned'
+            : '$mgrName${mgrPhone.isEmpty ? '' : ' • $mgrPhone'}';
 
         final pmPanel = Container(
           margin: const EdgeInsets.only(top: 10),
@@ -725,16 +739,13 @@ class _LandlordHomeState extends State<LandlordHome> {
                     child: Text(
                       'Property Managers',
                       style: t.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w900),
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
                 ],
               ),
               const SizedBox(height: 8),
-              Text(
-                mgr == null ? 'Not assigned' : '$mgrName${mgrPhone.trim().isEmpty ? '' : ' • $mgrPhone'}',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
+              Text(mgrLine, maxLines: 1, overflow: TextOverflow.ellipsis),
               const SizedBox(height: 10),
               Wrap(
                 spacing: 8,
