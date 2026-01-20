@@ -3,18 +3,15 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:jwt_decoder/jwt_decoder.dart';
 
-/// How long a session should live at most (even if server gives longer).
 const Duration kClientMaxSession = Duration(hours: 2);
-
-/// Special header that tells ngrok to skip the browser interstitial page.
-/// We’ll include it in all authenticated requests automatically.
 const String kNgrokBypassHeader = 'ngrok-skip-browser-warning';
 const String kNgrokBypassValue = 'true';
 
 class AuthSession {
   final String token;
   final String role; // admin | landlord | manager | tenant
-  final int userId;
+  final int userId; // for manager: staff id
+  final int? managerId; // for manager: org id
   final DateTime expiresAt;
 
   AuthSession({
@@ -22,6 +19,7 @@ class AuthSession {
     required this.role,
     required this.userId,
     required this.expiresAt,
+    this.managerId,
   });
 
   bool get isExpired => DateTime.now().isAfter(expiresAt);
@@ -30,6 +28,7 @@ class AuthSession {
         'token': token,
         'role': role,
         'userId': userId,
+        'managerId': managerId,
         'expiresAt': expiresAt.toIso8601String(),
       };
 
@@ -37,6 +36,7 @@ class AuthSession {
         token: json['token'] as String,
         role: json['role'] as String,
         userId: (json['userId'] as num).toInt(),
+        managerId: json['managerId'] == null ? null : (json['managerId'] as num).toInt(),
         expiresAt: DateTime.parse(json['expiresAt'] as String),
       );
 }
@@ -44,25 +44,20 @@ class AuthSession {
 class TokenManager {
   static const _kSessionKey = 'auth_session_v1';
 
-  /// Save a new session. We’ll respect the server’s JWT `exp` if present,
-  /// but still cap it at 2 hours client-side.
   static Future<void> saveSession({
     required String token,
     required String role,
     required int userId,
+    int? managerId,
   }) async {
     final now = DateTime.now();
 
-    // Try to read exp from JWT (in seconds since epoch). If absent, ignore.
     DateTime? jwtExp;
     try {
       if (token.isNotEmpty && !JwtDecoder.isExpired(token)) {
-        final exp = JwtDecoder.getExpirationDate(token);
-        jwtExp = exp;
+        jwtExp = JwtDecoder.getExpirationDate(token);
       }
-    } catch (_) {
-      // If parsing fails, ignore and rely on client cap.
-    }
+    } catch (_) {}
 
     final clientCap = now.add(kClientMaxSession);
     final expiresAt = (jwtExp == null) ? clientCap : _minDate(jwtExp, clientCap);
@@ -71,6 +66,7 @@ class TokenManager {
       token: token,
       role: role,
       userId: userId,
+      managerId: managerId,
       expiresAt: expiresAt,
     );
 
@@ -78,7 +74,6 @@ class TokenManager {
     await prefs.setString(_kSessionKey, jsonEncode(session.toJson()));
   }
 
-  /// Load existing session (null if none or expired).
   static Future<AuthSession?> loadSession() async {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString(_kSessionKey);
@@ -98,17 +93,14 @@ class TokenManager {
     }
   }
 
-  /// Quick check for guards.
   static Future<bool> isLoggedIn() async {
     final s = await loadSession();
     return s != null && !s.isExpired;
   }
 
-  /// Use in your API client: `headers: await TokenManager.authHeaders()`
   static Future<Map<String, String>> authHeaders() async {
     final s = await loadSession();
     final headers = <String, String>{
-      // 👇 critical for ngrok: skip the browser warning interstitial
       kNgrokBypassHeader: kNgrokBypassValue,
     };
     if (s != null) {
@@ -117,16 +109,14 @@ class TokenManager {
     return headers;
   }
 
-  /// For routing decisions (e.g., pick a dashboard).
   static Future<String?> currentRole() async => (await loadSession())?.role;
-
   static Future<int?> currentUserId() async => (await loadSession())?.userId;
+  static Future<int?> currentManagerId() async => (await loadSession())?.managerId;
 
   static Future<void> clearSession() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_kSessionKey);
   }
 
-  static DateTime _minDate(DateTime a, DateTime b) =>
-      a.isBefore(b) ? a : b;
+  static DateTime _minDate(DateTime a, DateTime b) => a.isBefore(b) ? a : b;
 }

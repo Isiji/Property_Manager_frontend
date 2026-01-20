@@ -13,10 +13,14 @@ class ManagerHome extends StatefulWidget {
 }
 
 class _ManagerHomeState extends State<ManagerHome> {
-  int? _managerId;
+  int? _staffId;     // manager_user_id (staff)
+  int? _managerId;   // manager_id (org)
 
-  String _managerName = '—';
-  String _managerPhone = '';
+  String _orgName = '—';       // manager_name
+  String _staffName = '—';     // display_name
+  String _staffPhone = '';
+  String _managerType = 'individual';
+
   bool _loadingProfile = true;
 
   @override
@@ -26,7 +30,7 @@ class _ManagerHomeState extends State<ManagerHome> {
   }
 
   Future<void> _init() async {
-    final id = await TokenManager.currentUserId();
+    final id = await TokenManager.currentUserId(); // staff id after agency upgrade
     final role = await TokenManager.currentRole();
     print('🔐 manager home init => id=$id role=$role');
 
@@ -40,30 +44,57 @@ class _ManagerHomeState extends State<ManagerHome> {
       return;
     }
 
-    setState(() => _managerId = id);
-    await _loadManagerProfile();
+    // Save staff id (what you already store as userId)
+    setState(() => _staffId = id);
+
+    await _loadManagerMe();
   }
 
-  Future<void> _loadManagerProfile() async {
-    if (_managerId == null) return;
+  Future<void> _loadManagerMe() async {
     try {
       setState(() => _loadingProfile = true);
 
-      final m = await ManagerService.getManager(_managerId!);
-      final name = (m['name'] ?? '').toString().trim();
-      final phone = (m['phone'] ?? '').toString().trim();
+      final me = await ManagerService.getMe();
+
+      final orgName = (me['manager_name'] ?? '').toString().trim();
+      final staffName = (me['display_name'] ?? '').toString().trim();
+      final staffPhone = (me['staff_phone'] ?? '').toString().trim();
+      final mType = (me['manager_type'] ?? 'individual').toString().trim();
+
+      final staffId = (me['manager_user_id'] is num) ? (me['manager_user_id'] as num).toInt() : _staffId;
+      final managerId = (me['manager_id'] is num) ? (me['manager_id'] as num).toInt() : null;
 
       if (!mounted) return;
       setState(() {
-        _managerName = name.isEmpty ? '—' : name;
-        _managerPhone = phone;
+        _orgName = orgName.isEmpty ? '—' : orgName;
+        _staffName = staffName.isEmpty ? '—' : staffName;
+        _staffPhone = staffPhone;
+        _managerType = mType.isEmpty ? 'individual' : mType;
+
+        _staffId = staffId;
+        _managerId = managerId;
       });
+
+      // OPTIONAL (but recommended):
+      // If you upgraded TokenManager to store managerId,
+      // you can persist it here after /me resolves.
+      //
+      // await TokenManager.saveSession(
+      //   token: (await TokenManager.loadSession())!.token,
+      //   role: 'manager',
+      //   userId: _staffId!,
+      //   managerId: _managerId,
+      // );
+
     } catch (e) {
-      print('💥 manager profile load failed: $e');
+      print('💥 manager /me load failed: $e');
       if (!mounted) return;
       setState(() {
-        _managerName = '—';
-        _managerPhone = '';
+        _orgName = '—';
+        _staffName = '—';
+        _staffPhone = '';
+        _managerType = 'individual';
+        _managerId = null;
       });
     } finally {
       if (mounted) setState(() => _loadingProfile = false);
@@ -74,11 +105,19 @@ class _ManagerHomeState extends State<ManagerHome> {
   Widget build(BuildContext context) {
     final t = Theme.of(context);
 
+    // headline: agency => org name; individual => "Welcome, {org name}"
+    final headline = _loadingProfile
+        ? 'Welcome'
+        : (_managerType == 'agency'
+            ? _orgName
+            : (_orgName == '—' ? 'Welcome, Manager' : 'Welcome, $_orgName'));
+
     final subtitle = _loadingProfile
         ? 'Loading profile…'
-        : (_managerPhone.trim().isEmpty
-            ? 'ID: ${_managerId ?? "—"}'
-            : '$_managerPhone • ID: ${_managerId ?? "—"}');
+        : '${_staffName == '—' ? 'Staff' : _staffName}'
+          '${_staffPhone.trim().isEmpty ? '' : ' • $_staffPhone'}'
+          ' • Staff ID: ${_staffId ?? "—"}'
+          '${_managerId == null ? '' : ' • Org ID: $_managerId'}';
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
@@ -96,7 +135,10 @@ class _ManagerHomeState extends State<ManagerHome> {
                     shape: BoxShape.circle,
                     color: t.colorScheme.primary.withOpacity(.12),
                   ),
-                  child: Icon(LucideIcons.userCog, color: t.colorScheme.primary),
+                  child: Icon(
+                    _managerType == 'agency' ? LucideIcons.building2 : LucideIcons.userCog,
+                    color: t.colorScheme.primary,
+                  ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -104,7 +146,7 @@ class _ManagerHomeState extends State<ManagerHome> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        _managerName == '—' ? 'Welcome, Manager' : 'Welcome, $_managerName',
+                        headline,
                         style: t.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w900),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
@@ -121,7 +163,7 @@ class _ManagerHomeState extends State<ManagerHome> {
                 ),
                 IconButton(
                   tooltip: 'Refresh profile',
-                  onPressed: _loadManagerProfile,
+                  onPressed: _loadManagerMe,
                   icon: const Icon(LucideIcons.refreshCcw, size: 18),
                 ),
               ],

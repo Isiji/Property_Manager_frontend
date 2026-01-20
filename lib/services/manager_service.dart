@@ -19,7 +19,40 @@ class ManagerService {
     return '${res.statusCode} $d';
   }
 
+  /// GET /managers/me
+  /// Returns:
+  /// {
+  ///   manager_user_id,
+  ///   manager_id,
+  ///   display_name,
+  ///   manager_type,
+  ///   manager_name,
+  ///   staff_role,
+  ///   staff_phone
+  /// }
+  static Future<Map<String, dynamic>> getMe() async {
+    final headers = await TokenManager.authHeaders();
+    final url = Uri.parse('${AppConfig.apiBaseUrl}/managers/me');
+
+    print('[ManagerService] GET $url');
+    final res = await http.get(url, headers: {
+      'Content-Type': 'application/json',
+      ...headers,
+    });
+
+    print('[ManagerService] ← ${res.statusCode} ${res.body}');
+    if (res.statusCode == 200) {
+      final decoded = jsonDecode(res.body);
+      if (decoded is Map<String, dynamic>) return decoded;
+      return <String, dynamic>{};
+    }
+    throw Exception('Failed to load manager session: ${_errMsg(res)}');
+  }
+
   /// GET /managers/{id}
+  /// NOTE: This is now for the MANAGER ORG profile (PropertyManager org),
+  /// not the staff user.
+  /// Only call this using managerId (org id), not userId (staff id).
   static Future<Map<String, dynamic>> getManager(int managerId) async {
     final headers = await TokenManager.authHeaders();
     final url = Uri.parse('${AppConfig.apiBaseUrl}/managers/$managerId');
@@ -36,6 +69,6 @@ class ManagerService {
       if (decoded is Map<String, dynamic>) return decoded;
       return <String, dynamic>{};
     }
-    throw Exception('Failed to load manager: ${_errMsg(res)}');
+    throw Exception('Failed to load manager org: ${_errMsg(res)}');
   }
 }
