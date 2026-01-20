@@ -1,7 +1,9 @@
 // ignore_for_file: avoid_print, use_build_context_synchronously
 import 'package:flutter/material.dart';
 import 'package:lucide_icons/lucide_icons.dart';
+
 import 'package:property_manager_frontend/utils/token_manager.dart';
+import 'package:property_manager_frontend/services/manager_service.dart';
 
 class ManagerHome extends StatefulWidget {
   const ManagerHome({super.key});
@@ -12,6 +14,10 @@ class ManagerHome extends StatefulWidget {
 
 class _ManagerHomeState extends State<ManagerHome> {
   int? _managerId;
+
+  String _managerName = '—';
+  String _managerPhone = '';
+  bool _loadingProfile = true;
 
   @override
   void initState() {
@@ -35,11 +41,44 @@ class _ManagerHomeState extends State<ManagerHome> {
     }
 
     setState(() => _managerId = id);
+    await _loadManagerProfile();
+  }
+
+  Future<void> _loadManagerProfile() async {
+    if (_managerId == null) return;
+    try {
+      setState(() => _loadingProfile = true);
+
+      final m = await ManagerService.getManager(_managerId!);
+      final name = (m['name'] ?? '').toString().trim();
+      final phone = (m['phone'] ?? '').toString().trim();
+
+      if (!mounted) return;
+      setState(() {
+        _managerName = name.isEmpty ? '—' : name;
+        _managerPhone = phone;
+      });
+    } catch (e) {
+      print('💥 manager profile load failed: $e');
+      if (!mounted) return;
+      setState(() {
+        _managerName = '—';
+        _managerPhone = '';
+      });
+    } finally {
+      if (mounted) setState(() => _loadingProfile = false);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context);
+
+    final subtitle = _loadingProfile
+        ? 'Loading profile…'
+        : (_managerPhone.trim().isEmpty
+            ? 'ID: ${_managerId ?? "—"}'
+            : '$_managerPhone • ID: ${_managerId ?? "—"}');
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
@@ -65,16 +104,25 @@ class _ManagerHomeState extends State<ManagerHome> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Welcome, Manager',
+                        _managerName == '—' ? 'Welcome, Manager' : 'Welcome, $_managerName',
                         style: t.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w900),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        _managerId == null ? 'Loading…' : 'Manager ID: $_managerId',
+                        subtitle,
                         style: t.textTheme.bodySmall?.copyWith(color: t.hintColor),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ],
                   ),
+                ),
+                IconButton(
+                  tooltip: 'Refresh profile',
+                  onPressed: _loadManagerProfile,
+                  icon: const Icon(LucideIcons.refreshCcw, size: 18),
                 ),
               ],
             ),
@@ -105,7 +153,7 @@ class _ManagerHomeState extends State<ManagerHome> {
                   'Use the side menu to move between:\n'
                   '• Properties (units, tenants, payments)\n'
                   '• Maintenance Inbox\n'
-                  '• Settings\n',
+                  '• Settings',
                   style: t.textTheme.bodySmall?.copyWith(color: t.hintColor, height: 1.35),
                 ),
               ],
