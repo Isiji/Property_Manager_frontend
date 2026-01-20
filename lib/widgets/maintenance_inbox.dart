@@ -7,6 +7,7 @@ import 'package:property_manager_frontend/utils/token_manager.dart';
 
 class MaintenanceInboxSheet extends StatefulWidget {
   const MaintenanceInboxSheet({super.key});
+
   @override
   State<MaintenanceInboxSheet> createState() => _MaintenanceInboxSheetState();
 }
@@ -26,19 +27,66 @@ class _MaintenanceInboxSheetState extends State<MaintenanceInboxSheet> {
 
   Future<Map<String, String>> _auth() => TokenManager.authHeaders();
 
+  Future<void> _logout() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Log out'),
+        content: const Text('Are you sure you want to log out?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Log out')),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+
+    await TokenManager.clearSession();
+    if (!mounted) return;
+
+    // Close sheet first (if possible) to avoid weird overlay states
+    if (Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+    }
+
+    // Then go login
+    Navigator.of(context).pushNamedAndRemoveUntil('/login', (_) => false);
+  }
+
+  Future<void> _handle401() async {
+    await TokenManager.clearSession();
+    if (!mounted) return;
+
+    // Close sheet if it is open
+    if (Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Session expired. Please log in again.')),
+    );
+    Navigator.of(context).pushNamedAndRemoveUntil('/login', (_) => false);
+  }
+
   Future<void> _load() async {
     try {
       setState(() => _loading = true);
       await _loadStatuses();
+
       final qs = <String, String>{};
       if (_statusFilter != null) qs['status_id'] = '${_statusFilter!}';
 
       final h = await _auth();
       final url = Uri.parse('${AppConfig.apiBaseUrl}/maintenance/my').replace(queryParameters: qs);
+
       final r = await http.get(url, headers: {'Content-Type': 'application/json', ...h});
+
       if (r.statusCode == 200) {
         final b = jsonDecode(r.body);
         setState(() => _items = (b is List) ? b : const []);
+      } else if (r.statusCode == 401) {
+        await _handle401();
+        return;
       } else {
         throw Exception('${r.statusCode} ${r.body}');
       }
@@ -54,12 +102,22 @@ class _MaintenanceInboxSheetState extends State<MaintenanceInboxSheet> {
     final h = await _auth();
     final url = Uri.parse('${AppConfig.apiBaseUrl}/maintenance/status/');
     final r = await http.get(url, headers: {'Content-Type': 'application/json', ...h});
+
     if (r.statusCode == 200) {
       final b = jsonDecode(r.body);
       if (b is List) {
-        _statusIdToName = {for (final s in b) (s['id'] as num).toInt(): (s['name'] ?? '').toString()};
-        _statusNameToId = {for (final s in b) (s['name'] ?? '').toString(): (s['id'] as num).toInt()};
+        _statusIdToName = {
+          for (final s in b)
+            (s['id'] as num).toInt(): (s['name'] ?? '').toString()
+        };
+        _statusNameToId = {
+          for (final s in b)
+            (s['name'] ?? '').toString(): (s['id'] as num).toInt()
+        };
       }
+    } else if (r.statusCode == 401) {
+      await _handle401();
+      return;
     }
   }
 
@@ -83,10 +141,14 @@ class _MaintenanceInboxSheetState extends State<MaintenanceInboxSheet> {
       final url = Uri.parse('${AppConfig.apiBaseUrl}/maintenance/$id');
       final body = jsonEncode({'status_id': nextId});
       final r = await http.put(url, headers: {'Content-Type': 'application/json', ...h}, body: body);
+
       if (r.statusCode == 200) {
         await _load();
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Marked $nextName')));
+      } else if (r.statusCode == 401) {
+        await _handle401();
+        return;
       } else {
         throw Exception('${r.statusCode} ${r.body}');
       }
@@ -99,16 +161,41 @@ class _MaintenanceInboxSheetState extends State<MaintenanceInboxSheet> {
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context);
+
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            // Header row: Close + Title + Logout
             Row(
               children: [
-                Text('Maintenance Inbox', style: t.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
-                const Spacer(),
+                IconButton(
+                  tooltip: 'Close',
+                  icon: const Icon(Icons.close_rounded),
+                  onPressed: () => Navigator.of(context).pop(),
+                ),
+                Expanded(
+                  child: Text(
+                    'Maintenance Inbox',
+                    style: t.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Log out',
+                  icon: const Icon(Icons.logout_rounded),
+                  onPressed: _logout,
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 6),
+
+            // Filters + Reload
+            Row(
+              children: [
                 DropdownButton<int?>(
                   value: _statusFilter,
                   hint: const Text('All'),
@@ -117,9 +204,12 @@ class _MaintenanceInboxSheetState extends State<MaintenanceInboxSheet> {
                     for (final e in _statusIdToName.entries)
                       DropdownMenuItem(value: e.key, child: Text(e.value)),
                   ],
-                  onChanged: (v) => setState(() => _statusFilter = v),
+                  onChanged: (v) async {
+                    setState(() => _statusFilter = v);
+                    await _load(); // auto reload when filter changes
+                  },
                 ),
-                const SizedBox(width: 8),
+                const Spacer(),
                 OutlinedButton.icon(
                   onPressed: _load,
                   icon: const Icon(Icons.refresh_rounded),
@@ -127,7 +217,9 @@ class _MaintenanceInboxSheetState extends State<MaintenanceInboxSheet> {
                 ),
               ],
             ),
+
             const SizedBox(height: 8),
+
             if (_loading)
               const Padding(
                 padding: EdgeInsets.all(24),
@@ -150,6 +242,7 @@ class _MaintenanceInboxSheetState extends State<MaintenanceInboxSheet> {
                     final created = (m['created_at'] ?? '').toString();
                     final statusId = (m['status_id'] as num?)?.toInt();
                     final statusName = _statusName(statusId);
+
                     final chip = Container(
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                       decoration: BoxDecoration(

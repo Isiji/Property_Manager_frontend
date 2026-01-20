@@ -19,9 +19,13 @@ class ManagerPropertiesScreen extends StatefulWidget {
 class _ManagerPropertiesScreenState extends State<ManagerPropertiesScreen> {
   bool _loading = true;
 
-  int? _managerId;
-  String _managerName = '—';
-  String _managerPhone = '';
+  int? _staffId;   // manager_user_id (staff)
+  int? _managerId; // manager_id (org)
+
+  String _orgName = '—';       // manager_name (agency/company or individual name)
+  String _staffName = '—';     // display_name
+  String _staffPhone = '';
+  String _managerType = 'individual'; // agency | individual
 
   List<dynamic> _properties = [];
   String _search = '';
@@ -56,7 +60,7 @@ class _ManagerPropertiesScreenState extends State<ManagerPropertiesScreen> {
   }
 
   Future<void> _init() async {
-    final id = await TokenManager.currentUserId();
+    final id = await TokenManager.currentUserId(); // in agency mode: this is STAFF id
     final role = await TokenManager.currentRole();
 
     if (!mounted) return;
@@ -69,15 +73,75 @@ class _ManagerPropertiesScreenState extends State<ManagerPropertiesScreen> {
       return;
     }
 
-    _managerId = id;
+    setState(() => _staffId = id);
 
-    await Future.wait([
-      _loadManagerProfile(),
-      _loadProperties(),
-    ]);
+    // Load /managers/me first to resolve manager org id
+    await _loadManagerMe();
+
+    // Now load properties using org manager_id
+    await _loadProperties();
 
     if (!mounted) return;
     setState(() => _loading = false);
+  }
+
+  Future<void> _refreshAll() async {
+    setState(() => _loading = true);
+    await _loadManagerMe();
+    await _loadProperties();
+    if (!mounted) return;
+    setState(() => _loading = false);
+  }
+
+  Future<void> _loadManagerMe() async {
+    try {
+      final me = await ManagerService.getMe();
+
+      final orgName = (me['manager_name'] ?? '').toString().trim();
+      final staffName = (me['display_name'] ?? '').toString().trim();
+      final staffPhone = (me['staff_phone'] ?? '').toString().trim();
+      final mType = (me['manager_type'] ?? 'individual').toString().trim();
+
+      final staffId = (me['manager_user_id'] is num) ? (me['manager_user_id'] as num).toInt() : _staffId;
+      final managerId = (me['manager_id'] is num) ? (me['manager_id'] as num).toInt() : null;
+
+      if (!mounted) return;
+      setState(() {
+        _orgName = orgName.isEmpty ? '—' : orgName;
+        _staffName = staffName.isEmpty ? '—' : staffName;
+        _staffPhone = staffPhone;
+        _managerType = mType.isEmpty ? 'individual' : mType;
+
+        _staffId = staffId;
+        _managerId = managerId;
+      });
+    } catch (e) {
+      print('💥 manager /me load failed: $e');
+
+      final msg = e.toString();
+      if (msg.contains('401')) {
+        await TokenManager.clearSession();
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Session expired. Please log in again.')),
+        );
+        Navigator.of(context).pushNamedAndRemoveUntil('/login', (_) => false);
+        return;
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _orgName = '—';
+        _staffName = '—';
+        _staffPhone = '';
+        _managerType = 'individual';
+        _managerId = null;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to load manager session: $e')),
+      );
+    }
   }
 
   Future<void> _load_attachDefaultsForPeriods(List<dynamic> data) async {
@@ -90,29 +154,11 @@ class _ManagerPropertiesScreenState extends State<ManagerPropertiesScreen> {
     }
   }
 
-  Future<void> _loadManagerProfile() async {
-    if (_managerId == null) return;
-    try {
-      final m = await ManagerService.getManager(_managerId!);
-      final name = (m['name'] ?? '').toString().trim();
-      final phone = (m['phone'] ?? '').toString().trim();
-      if (!mounted) return;
-      setState(() {
-        _managerName = name.isEmpty ? '—' : name;
-        _managerPhone = phone;
-      });
-    } catch (e) {
-      print('💥 manager profile load failed: $e');
-      if (!mounted) return;
-      setState(() {
-        _managerName = '—';
-        _managerPhone = '';
-      });
-    }
-  }
-
   Future<void> _loadProperties() async {
-    if (_managerId == null) return;
+    if (_managerId == null) {
+      // without org manager_id, properties endpoint can't work
+      return;
+    }
 
     try {
       final data = await PropertyService.getPropertiesByManager(_managerId!);
@@ -121,6 +167,18 @@ class _ManagerPropertiesScreenState extends State<ManagerPropertiesScreen> {
       await _load_attachDefaultsForPeriods(data);
     } catch (e) {
       print('💥 manager properties load failed: $e');
+
+      final msg = e.toString();
+      if (msg.contains('401')) {
+        await TokenManager.clearSession();
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Session expired. Please log in again.')),
+        );
+        Navigator.of(context).pushNamedAndRemoveUntil('/login', (_) => false);
+        return;
+      }
+
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Failed to load properties: $e')),
@@ -197,7 +255,6 @@ class _ManagerPropertiesScreenState extends State<ManagerPropertiesScreen> {
 
       if (!mounted) return;
       // Keep this quiet-ish; payments can be loaded a lot on scroll
-      // You can comment this out if it’s noisy.
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Payments status failed: $e')),
       );
@@ -251,6 +308,17 @@ class _ManagerPropertiesScreenState extends State<ManagerPropertiesScreen> {
     final t = Theme.of(context);
     final list = _filtered;
 
+    final headline = _loading
+        ? 'Manager • Properties'
+        : (_managerType == 'agency' ? '$_orgName • Properties' : 'Manager • Properties');
+
+    final subtitle = _loading
+        ? 'Loading…'
+        : '${_staffName == '—' ? 'Staff' : _staffName}'
+          '${_staffPhone.trim().isEmpty ? '' : ' • $_staffPhone'}'
+          ' • Staff ID: ${_staffId ?? "—"}'
+          '${_managerId == null ? '' : ' • Org ID: $_managerId'}';
+
     return Scaffold(
       appBar: AppBar(
         // ✅ Back button that works even when browser back doesn't
@@ -261,22 +329,16 @@ class _ManagerPropertiesScreenState extends State<ManagerPropertiesScreen> {
             if (Navigator.of(context).canPop()) {
               Navigator.of(context).pop();
             } else {
-              // If there is no stack (e.g., direct opened route), go back to dashboard
               Navigator.of(context).pushReplacementNamed('/dashboard');
             }
           },
         ),
-        title: const Text('Manager • Properties'),
+        title: Text(headline),
         actions: [
           IconButton(
             tooltip: 'Refresh',
             icon: const Icon(LucideIcons.refreshCcw),
-            onPressed: () async {
-              setState(() => _loading = true);
-              await Future.wait([_loadManagerProfile(), _loadProperties()]);
-              if (!mounted) return;
-              setState(() => _loading = false);
-            },
+            onPressed: _refreshAll,
           ),
           IconButton(
             tooltip: 'Log out',
@@ -302,7 +364,10 @@ class _ManagerPropertiesScreenState extends State<ManagerPropertiesScreen> {
                       shape: BoxShape.circle,
                       color: t.colorScheme.primary.withOpacity(.12),
                     ),
-                    child: Icon(LucideIcons.userCog, color: t.colorScheme.primary),
+                    child: Icon(
+                      _managerType == 'agency' ? LucideIcons.building2 : LucideIcons.userCog,
+                      color: t.colorScheme.primary,
+                    ),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
@@ -310,16 +375,14 @@ class _ManagerPropertiesScreenState extends State<ManagerPropertiesScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          _managerName,
+                          _managerType == 'agency' ? _orgName : (_orgName == '—' ? 'Manager' : _orgName),
                           style: t.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w900),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          _managerPhone.trim().isEmpty
-                              ? 'Manager ID: ${_managerId ?? "—"}'
-                              : '$_managerPhone • ID: ${_managerId ?? "—"}',
+                          subtitle,
                           style: t.textTheme.bodySmall?.copyWith(color: t.hintColor),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
@@ -351,6 +414,21 @@ class _ManagerPropertiesScreenState extends State<ManagerPropertiesScreen> {
               padding: EdgeInsets.all(24),
               child: Center(child: CircularProgressIndicator()),
             )
+          else if (_managerId == null)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 30),
+              child: Column(
+                children: [
+                  const Icon(LucideIcons.shieldAlert, size: 52, color: Colors.grey),
+                  const SizedBox(height: 10),
+                  Text(
+                    'Manager org not resolved.\nPlease refresh or log in again.',
+                    textAlign: TextAlign.center,
+                    style: t.textTheme.bodyMedium?.copyWith(color: t.hintColor),
+                  ),
+                ],
+              ),
+            )
           else if (list.isEmpty)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 30),
@@ -359,7 +437,7 @@ class _ManagerPropertiesScreenState extends State<ManagerPropertiesScreen> {
                   const Icon(LucideIcons.folderOpen, size: 52, color: Colors.grey),
                   const SizedBox(height: 10),
                   Text(
-                    'No properties assigned to you yet.',
+                    'No properties assigned to this manager yet.',
                     style: t.textTheme.bodyMedium?.copyWith(color: t.hintColor),
                   ),
                 ],
