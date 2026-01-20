@@ -69,20 +69,6 @@ class PropSmartApp extends StatelessWidget {
 
         // ✅ One common dashboard shell
         '/dashboard': (_) => const DashboardShell(),
-        '/manager_payments': (context) {
-          final args = ModalRoute.of(context)!.settings.arguments;
-          if (args is Map && args['propertyId'] is int && args['period'] is String) {
-            return ManagerPaymentsScreen(
-              propertyId: args['propertyId'] as int,
-              initialPeriod: args['period'] as String,
-              propertyName: args['propertyName']?.toString(),
-              propertyCode: args['propertyCode']?.toString(),
-            );
-          }
-          throw ArgumentError(
-            'Route /manager_payments requires {propertyId:int, period:String, propertyName?:String, propertyCode?:String}',
-          );
-        },
 
         '/lease_view': (ctx) => const LeaseViewScreen(),
 
@@ -101,25 +87,39 @@ class PropSmartApp extends StatelessWidget {
         // ✅ Manager screens
         '/manager_properties': (_) => const ManagerPropertiesScreen(),
         
-        '/manager_tenants': (context) {
-          final args = ModalRoute.of(context)!.settings.arguments;
-          int propertyId;
-          String? propertyCode;
+        '/manager_payments': (context) {
+          final args = ModalRoute.of(context)!.settings.arguments as Map?;
+          final propertyId = (args?['propertyId'] as num?)?.toInt() ?? 0;
+          final propertyCode = args?['propertyCode']?.toString();
+          final propertyName = args?['propertyName']?.toString();
+          final period = args?['period']?.toString();
 
-          if (args is int) {
-            propertyId = args;
-          } else if (args is Map && args['propertyId'] is int) {
-            propertyId = args['propertyId'] as int;
-            propertyCode = args['propertyCode']?.toString();
-          } else {
-            throw ArgumentError(
-              'Route /manager_tenants requires int propertyId or {propertyId:int, propertyCode?:String}',
-            );
+          if (propertyId == 0) {
+            throw ArgumentError('Route /manager_payments requires propertyId');
+          }
+
+          return ManagerPaymentsScreen(
+            propertyId: propertyId,
+            propertyCode: propertyCode,
+            propertyName: propertyName,
+            initialPeriod: period,
+          );
+        },
+
+        '/manager_tenants': (context) {
+          final args = ModalRoute.of(context)!.settings.arguments as Map?;
+          final propertyId = (args?['propertyId'] as num?)?.toInt() ?? 0;
+          final propertyCode = args?['propertyCode']?.toString();
+          final propertyName = args?['propertyName']?.toString();
+
+          if (propertyId == 0) {
+            throw ArgumentError('Route /manager_tenants requires propertyId');
           }
 
           return ManagerTenantsScreen(
             propertyId: propertyId,
             propertyCode: propertyCode,
+            propertyName: propertyName,
           );
         },
 

@@ -5,14 +5,16 @@ import 'package:lucide_icons/lucide_icons.dart';
 import 'package:property_manager_frontend/utils/token_manager.dart';
 
 class DashboardNavItem {
-  final String key; // e.g. 'overview', 'properties'
   final IconData icon;
   final String label;
+  final String route;
+  final Object? arguments;
 
-  const DashboardNavItem({
-    required this.key,
+  DashboardNavItem({
     required this.icon,
     required this.label,
+    required this.route,
+    this.arguments,
   });
 }
 
@@ -25,24 +27,24 @@ class BaseDashboard extends StatefulWidget {
   final Widget body;
   final Widget? floatingActionButton;
 
-  /// Side nav control
-  final List<DashboardNavItem> navItems;
-  final String selectedNavKey;
-  final ValueChanged<String> onSelectNav;
-
   /// Optional: show a copyable property code chip in the AppBar row.
   final String? propertyCode;
 
   /// Optional: show units count chip in the AppBar row.
   final int? unitsCount;
 
+  /// ✅ Provide navigation items (role-aware).
+  final List<DashboardNavItem> navItems;
+
+  /// ✅ For highlighting current item (route name).
+  final String currentRoute;
+
   const BaseDashboard({
     super.key,
     required this.title,
     required this.body,
     required this.navItems,
-    required this.selectedNavKey,
-    required this.onSelectNav,
+    required this.currentRoute,
     this.floatingActionButton,
     this.propertyCode,
     this.unitsCount,
@@ -92,12 +94,15 @@ class _BaseDashboardState extends State<BaseDashboard> {
     );
   }
 
-  void _selectNav(String key, {required bool isWide}) {
-    widget.onSelectNav(key);
-    if (!isWide) {
-      // close drawer after selection on small screens
-      Navigator.of(context).maybePop();
-    }
+  void _go(DashboardNavItem item) {
+    final current = ModalRoute.of(context)?.settings.name;
+    if (current == item.route) return;
+
+    Navigator.pushReplacementNamed(
+      context,
+      item.route,
+      arguments: item.arguments,
+    );
   }
 
   @override
@@ -109,7 +114,6 @@ class _BaseDashboardState extends State<BaseDashboard> {
         final isWide = constraints.maxWidth >= 800.0;
         final sideWidth = _collapsed ? 72.0 : 248.0;
 
-        // Common AppBar actions
         final actions = <Widget>[
           if (isWide)
             IconButton(
@@ -126,7 +130,6 @@ class _BaseDashboardState extends State<BaseDashboard> {
           const SizedBox(width: 8),
         ];
 
-        // Title row with optional pills
         final titleRow = LayoutBuilder(
           builder: (ctx, c) {
             final narrowTitle = c.maxWidth < 420;
@@ -171,11 +174,11 @@ class _BaseDashboardState extends State<BaseDashboard> {
           },
         );
 
-        final sideNav = _SideNav(
+        final side = _SideNav(
           collapsed: _collapsed,
+          currentRoute: widget.currentRoute,
           items: widget.navItems,
-          selectedKey: widget.selectedNavKey,
-          onSelect: (k) => _selectNav(k, isWide: isWide),
+          onTap: _go,
         );
 
         if (isWide) {
@@ -189,10 +192,10 @@ class _BaseDashboardState extends State<BaseDashboard> {
                   decoration: BoxDecoration(
                     color: theme.colorScheme.surface,
                     border: Border(
-                      right: BorderSide(color: theme.dividerColor.withValues(alpha: .3)),
+                      right: BorderSide(color: theme.dividerColor.withOpacity(.3)),
                     ),
                   ),
-                  child: sideNav,
+                  child: side,
                 ),
                 Expanded(
                   child: Container(
@@ -216,11 +219,12 @@ class _BaseDashboardState extends State<BaseDashboard> {
                 onPressed: () => Scaffold.of(ctx).openDrawer(),
               ),
             ),
-            actions: actions.where((w) => w is! IconButton || (w as IconButton).tooltip != 'Expand menu').toList(),
+            actions: actions,
           ),
-          drawer: Drawer(
-            child: SafeArea(child: _SideNav(collapsed: false, items: widget.navItems, selectedKey: widget.selectedNavKey, onSelect: (k) => _selectNav(k, isWide: isWide))),
-          ),
+          drawer: Drawer(child: SafeArea(child: _SideNav(collapsed: false, currentRoute: widget.currentRoute, items: widget.navItems, onTap: (i) {
+            Navigator.pop(context);
+            _go(i);
+          }))),
           body: Container(
             color: theme.colorScheme.surfaceContainerLowest,
             child: SafeArea(top: false, child: widget.body),
@@ -234,15 +238,15 @@ class _BaseDashboardState extends State<BaseDashboard> {
 
 class _SideNav extends StatelessWidget {
   final bool collapsed;
+  final String currentRoute;
   final List<DashboardNavItem> items;
-  final String selectedKey;
-  final ValueChanged<String> onSelect;
+  final void Function(DashboardNavItem) onTap;
 
   const _SideNav({
     required this.collapsed,
+    required this.currentRoute,
     required this.items,
-    required this.selectedKey,
-    required this.onSelect,
+    required this.onTap,
   });
 
   @override
@@ -251,28 +255,20 @@ class _SideNav extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 8),
       children: [
         const SizedBox(height: 8),
-        ...items.map((e) => _SideTile(
-              icon: e.icon,
-              label: e.label,
-              collapsed: collapsed,
-              selected: e.key == selectedKey,
-              onTap: () => onSelect(e.key),
-            )),
+        ...items.map((e) => _SideTile(item: e, collapsed: collapsed, selected: e.route == currentRoute, onTap: () => onTap(e))),
       ],
     );
   }
 }
 
 class _SideTile extends StatelessWidget {
-  final IconData icon;
-  final String label;
+  final DashboardNavItem item;
   final bool collapsed;
   final bool selected;
   final VoidCallback onTap;
 
   const _SideTile({
-    required this.icon,
-    required this.label,
+    required this.item,
     required this.collapsed,
     required this.selected,
     required this.onTap,
@@ -282,28 +278,28 @@ class _SideTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
+    final bg = selected ? theme.colorScheme.primary.withOpacity(.10) : Colors.transparent;
+    final fg = selected ? theme.colorScheme.primary : theme.colorScheme.primary;
+
     return InkWell(
       onTap: onTap,
       child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
-          color: selected ? theme.colorScheme.primary.withOpacity(.10) : Colors.transparent,
+          color: bg,
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: selected ? theme.colorScheme.primary.withOpacity(.25) : theme.dividerColor.withOpacity(.10),
-          ),
         ),
         child: Row(
           children: [
-            Icon(icon, size: 20, color: selected ? theme.colorScheme.primary : theme.hintColor),
+            Icon(item.icon, size: 20, color: fg),
             if (!collapsed) ...[
               const SizedBox(width: 12),
               Expanded(
                 child: Text(
-                  label,
+                  item.label,
                   style: theme.textTheme.bodyMedium?.copyWith(
-                    fontWeight: selected ? FontWeight.w800 : FontWeight.w500,
+                    fontWeight: selected ? FontWeight.w900 : FontWeight.w600,
                   ),
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -316,7 +312,6 @@ class _SideTile extends StatelessWidget {
   }
 }
 
-/// Small informative pill "Label: Value"
 class _InfoPill extends StatelessWidget {
   final IconData icon;
   final String label;
@@ -331,7 +326,7 @@ class _InfoPill extends StatelessWidget {
       decoration: BoxDecoration(
         color: t.colorScheme.surface,
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: t.dividerColor.withValues(alpha: .25)),
+        border: Border.all(color: t.dividerColor.withOpacity(.25)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -351,7 +346,6 @@ class _InfoPill extends StatelessWidget {
   }
 }
 
-/// Copyable pill for property code
 class _CopyablePill extends StatelessWidget {
   final IconData icon;
   final String label;
@@ -373,7 +367,7 @@ class _CopyablePill extends StatelessWidget {
       decoration: BoxDecoration(
         color: t.colorScheme.surface,
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: t.dividerColor.withValues(alpha: .25)),
+        border: Border.all(color: t.dividerColor.withOpacity(.25)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,

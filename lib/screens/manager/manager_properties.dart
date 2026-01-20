@@ -1,5 +1,4 @@
 // ignore_for_file: avoid_print, use_build_context_synchronously
-import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:lucide_icons/lucide_icons.dart';
@@ -97,7 +96,7 @@ class _ManagerPropertiesScreenState extends State<ManagerPropertiesScreen> {
       for (final raw in data) {
         final p = (raw is Map) ? Map<String, dynamic>.from(raw) : <String, dynamic>{};
         final pid = (p['id'] as num?)?.toInt();
-        if (pid != null) {
+        if (pid != null && pid != 0) {
           _selectedPeriod.putIfAbsent(pid, () => current);
         }
       }
@@ -124,7 +123,9 @@ class _ManagerPropertiesScreenState extends State<ManagerPropertiesScreen> {
   Future<void> _copy(String label, String text) async {
     await Clipboard.setData(ClipboardData(text: text));
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$label copied')));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('$label copied')),
+    );
   }
 
   List<String> _lastMonths({int count = 8}) {
@@ -145,6 +146,8 @@ class _ManagerPropertiesScreenState extends State<ManagerPropertiesScreen> {
   }
 
   void _ensurePaymentStatus(int propertyId, String period) {
+    if (propertyId == 0) return;
+
     final key = '$propertyId|$period';
     final cached = _paymentStatusCache[propertyId]?[period];
     if (cached != null) return;
@@ -167,9 +170,8 @@ class _ManagerPropertiesScreenState extends State<ManagerPropertiesScreen> {
     } catch (e) {
       print('💥 payments status failed for $propertyId $period: $e');
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Payments status failed: $e')),
-      );
+      // Optional: don’t spam snackbars while user scrolls
+      // ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Payments status failed: $e')));
     }
   }
 
@@ -301,13 +303,16 @@ class _ManagerPropertiesScreenState extends State<ManagerPropertiesScreen> {
                     children: [
                       const Icon(LucideIcons.info, size: 18),
                       const SizedBox(width: 8),
-                      Text('How to use', style: t.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w900)),
+                      Text(
+                        'How to use',
+                        style: t.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w900),
+                      ),
                     ],
                   ),
                   const SizedBox(height: 10),
                   Text(
                     '• Units: view all units for the property.\n'
-                    '• Tenants: see tenants per unit (assigned/not assigned).\n'
+                    '• Tenants: see tenants per unit.\n'
                     '• Maintenance: view requests inbox.\n'
                     '• Payments: open the full payments screen for a selected month.',
                     style: t.textTheme.bodySmall?.copyWith(color: t.hintColor, height: 1.35),
@@ -360,20 +365,20 @@ class _ManagerPropertiesScreenState extends State<ManagerPropertiesScreen> {
 
               final period = _selectedPeriod[pid] ?? _lastMonths().first;
 
-              // Preload payment status when card is built (safe / cached)
-              _ensurePaymentStatus(pid, period);
+              if (pid != 0) _ensurePaymentStatus(pid, period);
 
               final status = _paymentStatusCache[pid]?[period];
               final periodLoading = _paymentLoading.containsKey('$pid|$period');
 
-              // Try to read common keys safely (works even if backend structure differs)
               String val(dynamic x) => (x == null) ? '—' : x.toString();
 
               final paid = val(status?['paid'] ?? status?['paid_count'] ?? status?['paid_units']);
               final unpaid = val(status?['unpaid'] ?? status?['unpaid_count'] ?? status?['unpaid_units']);
               final overdue = val(status?['overdue'] ?? status?['overdue_count'] ?? status?['overdue_units']);
-              final expected = val(status?['expected_amount'] ?? status?['expected']);
+              final expected = val(status?['expected_amount'] ?? status?['expected'] ?? status?['total_expected']);
               final received = val(status?['paid_amount'] ?? status?['received_amount'] ?? status?['received']);
+
+              final hasStatus = status != null && status.isNotEmpty;
 
               return Card(
                 margin: const EdgeInsets.only(bottom: 12),
@@ -462,6 +467,7 @@ class _ManagerPropertiesScreenState extends State<ManagerPropertiesScreen> {
                                       arguments: {
                                         'propertyId': pid,
                                         'propertyCode': code,
+                                        'propertyName': name,
                                       },
                                     ),
                             icon: const Icon(LucideIcons.users, size: 18),
@@ -518,22 +524,29 @@ class _ManagerPropertiesScreenState extends State<ManagerPropertiesScreen> {
                                     items: _lastMonths(count: 10)
                                         .map((m) => DropdownMenuItem(value: m, child: Text(m)))
                                         .toList(),
-                                    onChanged: (v) {
-                                      if (v == null) return;
-                                      setState(() => _selectedPeriod[pid] = v);
-                                      _ensurePaymentStatus(pid, v);
-                                    },
+                                    onChanged: pid == 0
+                                        ? null
+                                        : (v) {
+                                            if (v == null) return;
+                                            setState(() => _selectedPeriod[pid] = v);
+                                            _ensurePaymentStatus(pid, v);
+                                          },
                                   ),
                                 ),
                               ],
                             ),
                             const SizedBox(height: 10),
-                            if (periodLoading)
+                            if (pid == 0)
+                              Text(
+                                'Invalid property.',
+                                style: t.textTheme.bodySmall?.copyWith(color: t.hintColor),
+                              )
+                            else if (periodLoading)
                               const Padding(
                                 padding: EdgeInsets.symmetric(vertical: 8),
                                 child: Center(child: CircularProgressIndicator()),
                               )
-                            else if (status == null)
+                            else if (!hasStatus)
                               Text(
                                 'No payment data yet for $period.',
                                 style: t.textTheme.bodySmall?.copyWith(color: t.hintColor),
