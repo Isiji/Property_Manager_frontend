@@ -22,8 +22,8 @@ class _ManagerPropertiesScreenState extends State<ManagerPropertiesScreen> {
   int? _staffId;   // manager_user_id (staff)
   int? _managerId; // manager_id (org)
 
-  String _orgName = '—';       // manager_name (agency/company or individual name)
-  String _staffName = '—';     // display_name
+  String _orgName = '—';
+  String _staffName = '—';
   String _staffPhone = '';
   String _managerType = 'individual'; // agency | individual
 
@@ -60,7 +60,7 @@ class _ManagerPropertiesScreenState extends State<ManagerPropertiesScreen> {
   }
 
   Future<void> _init() async {
-    final id = await TokenManager.currentUserId(); // in agency mode: this is STAFF id
+    final id = await TokenManager.currentUserId(); // staff id
     final role = await TokenManager.currentRole();
 
     if (!mounted) return;
@@ -75,10 +75,7 @@ class _ManagerPropertiesScreenState extends State<ManagerPropertiesScreen> {
 
     setState(() => _staffId = id);
 
-    // Load /managers/me first to resolve manager org id
     await _loadManagerMe();
-
-    // Now load properties using org manager_id
     await _loadProperties();
 
     if (!mounted) return;
@@ -156,12 +153,14 @@ class _ManagerPropertiesScreenState extends State<ManagerPropertiesScreen> {
 
   Future<void> _loadProperties() async {
     if (_managerId == null) {
-      // without org manager_id, properties endpoint can't work
       return;
     }
 
     try {
-      final data = await PropertyService.getPropertiesByManager(_managerId!);
+      // ✅ use the existing backend endpoint that you definitely have:
+      final data = await PropertyService.getMyVisibleProperties();
+
+
       if (!mounted) return;
       setState(() => _properties = data);
       await _load_attachDefaultsForPeriods(data);
@@ -254,7 +253,6 @@ class _ManagerPropertiesScreenState extends State<ManagerPropertiesScreen> {
       }
 
       if (!mounted) return;
-      // Keep this quiet-ish; payments can be loaded a lot on scroll
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Payments status failed: $e')),
       );
@@ -315,13 +313,12 @@ class _ManagerPropertiesScreenState extends State<ManagerPropertiesScreen> {
     final subtitle = _loading
         ? 'Loading…'
         : '${_staffName == '—' ? 'Staff' : _staffName}'
-          '${_staffPhone.trim().isEmpty ? '' : ' • $_staffPhone'}'
-          ' • Staff ID: ${_staffId ?? "—"}'
-          '${_managerId == null ? '' : ' • Org ID: $_managerId'}';
+            '${_staffPhone.trim().isEmpty ? '' : ' • $_staffPhone'}'
+            ' • Staff ID: ${_staffId ?? "—"}'
+            '${_managerId == null ? '' : ' • Org ID: $_managerId'}';
 
     return Scaffold(
       appBar: AppBar(
-        // ✅ Back button that works even when browser back doesn't
         leading: IconButton(
           tooltip: 'Back',
           icon: const Icon(LucideIcons.arrowLeft),
@@ -414,21 +411,6 @@ class _ManagerPropertiesScreenState extends State<ManagerPropertiesScreen> {
               padding: EdgeInsets.all(24),
               child: Center(child: CircularProgressIndicator()),
             )
-          else if (_managerId == null)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 30),
-              child: Column(
-                children: [
-                  const Icon(LucideIcons.shieldAlert, size: 52, color: Colors.grey),
-                  const SizedBox(height: 10),
-                  Text(
-                    'Manager org not resolved.\nPlease refresh or log in again.',
-                    textAlign: TextAlign.center,
-                    style: t.textTheme.bodyMedium?.copyWith(color: t.hintColor),
-                  ),
-                ],
-              ),
-            )
           else if (list.isEmpty)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 30),
@@ -439,6 +421,7 @@ class _ManagerPropertiesScreenState extends State<ManagerPropertiesScreen> {
                   Text(
                     'No properties assigned to this manager yet.',
                     style: t.textTheme.bodyMedium?.copyWith(color: t.hintColor),
+                    textAlign: TextAlign.center,
                   ),
                 ],
               ),
@@ -624,6 +607,7 @@ class _CopyChip extends StatelessWidget {
           Icon(icon, size: 16, color: t.hintColor),
           const SizedBox(width: 6),
           Text(label, style: t.textTheme.labelMedium),
+          const SizedBox(height: 0),
           const SizedBox(width: 6),
           InkWell(
             onTap: onCopy,

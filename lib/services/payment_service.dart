@@ -1,220 +1,206 @@
-// lib/services/payment_service.dart
 // ignore_for_file: avoid_print
+
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:http/http.dart' as http;
+
 import 'package:property_manager_frontend/core/config.dart';
 import 'package:property_manager_frontend/utils/token_manager.dart';
-import 'package:property_manager_frontend/events/app_events.dart';
-// For web download
-// ignore: avoid_web_libraries_in_flutter
-import 'dart:html' as html;
 
 class PaymentService {
-  static Map<String, String> _json(Map<String, String> h) => {
-        'Content-Type': 'application/json',
-        ...h,
-      };
-
-  static Future<Map<String, String>> _auth() => TokenManager.authHeaders();
-
-  /// GET /reports/property/{propertyId}/status?period=YYYY-MM
-  static Future<Map<String, dynamic>> getStatusByProperty({
-    required int propertyId,
-    required String period,
-  }) async {
-    final h = await _auth();
-    final url = Uri.parse('${AppConfig.apiBaseUrl}/reports/property/$propertyId/status')
-        .replace(queryParameters: {'period': period});
-    print('[PaymentService] GET $url');
-    final r = await http.get(url, headers: _json(h));
-    print('[PaymentService] ← ${r.statusCode}');
-    if (r.statusCode == 200) {
-      final b = jsonDecode(r.body);
-      return (b is Map) ? b.cast<String, dynamic>() : <String, dynamic>{};
-    }
-    throw Exception('Status failed: ${r.statusCode} ${r.body}');
+  // -----------------------------
+  // Helpers
+  // -----------------------------
+  static Map<String, dynamic> _tryDecodeMap(String body) {
+    try {
+      final v = jsonDecode(body);
+      if (v is Map<String, dynamic>) return v;
+    } catch (_) {}
+    return {'detail': body};
   }
 
-  /// POST /payments/record (manual cash entry)
-  static Future<Map<String, dynamic>> recordPayment({
-    required int leaseId,
-    required String period, // YYYY-MM
-    required num amount,
-    required String paidDate, // YYYY-MM-DD
-  }) async {
-    final h = await _auth();
-    final url = Uri.parse('${AppConfig.apiBaseUrl}/payments/record');
-    final body = {
-      'lease_id': leaseId,
-      'period': period,
-      'amount': amount,
-      'paid_date': paidDate,
-    };
-    print('[PaymentService] POST $url body=$body');
-    final r = await http.post(url, headers: _json(h), body: jsonEncode(body));
-    print('[PaymentService] ← ${r.statusCode} ${r.body}');
-    if (r.statusCode == 200 || r.statusCode == 201) {
-      final b = jsonDecode(r.body);
-      AppEvents.I.paymentActivity.add(null);
-      return (b is Map) ? b.cast<String, dynamic>() : <String, dynamic>{};
-    }
-    throw Exception('Record payment failed: ${r.statusCode} ${r.body}');
+  static String _errMsg(http.Response res) {
+    final m = _tryDecodeMap(res.body);
+    final d = (m['detail'] ?? m['message'] ?? res.body).toString();
+    return '${res.statusCode} $d';
   }
 
-  /// POST /payments/remind  (single reminder)
-  /// Optional message for SMS/WhatsApp + in-app notification.
-  static Future<Map<String, dynamic>> sendReminder({
-    required int leaseId,
-    String? message,
-  }) async {
-    final h = await _auth();
-    final u1 = Uri.parse('${AppConfig.apiBaseUrl}/payments/remind');
-    final u2 = Uri.parse('${AppConfig.apiBaseUrl}/payments/remind/'); // tolerant fallback
-    final body = {'lease_id': leaseId, if (message != null && message.isNotEmpty) 'message': message};
-    print('[PaymentService] POST $u1 body=$body');
-    var r = await http.post(u1, headers: _json(h), body: jsonEncode(body));
-    print('[PaymentService] ← ${r.statusCode} ${r.body}');
-    if (r.statusCode == 200) {
-      AppEvents.I.paymentActivity.add(null);
-      final b = jsonDecode(r.body);
-      return (b is Map) ? b.cast<String, dynamic>() : <String, dynamic>{};
+  static Map<String, dynamic> _decodeMapOrEmpty(http.Response res) {
+    if (res.statusCode == 200 || res.statusCode == 201) {
+      final decoded = jsonDecode(res.body);
+      if (decoded is Map<String, dynamic>) return decoded;
+      return <String, dynamic>{};
     }
-
-    if (r.statusCode == 404) {
-      print('[PaymentService] Retry with slash: $u2');
-      r = await http.post(u2, headers: _json(h), body: jsonEncode(body));
-      print('[PaymentService] ← ${r.statusCode} ${r.body}');
-      if (r.statusCode == 200) {
-        AppEvents.I.paymentActivity.add(null);
-        final b = jsonDecode(r.body);
-        return (b is Map) ? b.cast<String, dynamic>() : <String, dynamic>{};
-      }
-    }
-    throw Exception('Reminder failed: ${r.statusCode} ${r.body}');
+    throw Exception(_errMsg(res));
   }
 
-  /// POST /payments/remind/bulk (UNPAID only for property & period)
-  /// Adds a slash-safe fallback to handle 404.
-  static Future<void> sendRemindersBulk({
-    required int propertyId,
-    required String period,
-    String? message,
-  }) async {
-    final h = await _auth();
-    final body = {
-      'property_id': propertyId,
-      'period': period,
-      if (message != null && message.isNotEmpty) 'message': message,
-    };
-    final u1 = Uri.parse('${AppConfig.apiBaseUrl}/payments/remind/bulk');
-    final u2 = Uri.parse('${AppConfig.apiBaseUrl}/payments/remind/bulk/');
-
-    print('[PaymentService] POST $u1 body=$body');
-    var r = await http.post(u1, headers: _json(h), body: jsonEncode(body));
-    print('[PaymentService] ← ${r.statusCode} ${r.body}');
-    if (r.statusCode == 200) {
-      AppEvents.I.paymentActivity.add(null);
-      return;
-    }
-
-    if (r.statusCode == 404) {
-      print('[PaymentService] Retry with slash: $u2');
-      r = await http.post(u2, headers: _json(h), body: jsonEncode(body));
-      print('[PaymentService] ← ${r.statusCode} ${r.body}');
-      if (r.statusCode == 200) {
-        AppEvents.I.paymentActivity.add(null);
-        return;
-      }
-    }
-    throw Exception('Bulk reminders failed: ${r.statusCode} ${r.body}');
-  }
-
-  /// POST /payments/mpesa/initiate
+  // -----------------------------
+  // M-Pesa STK Push (Tenant)
+  // -----------------------------
   static Future<Map<String, dynamic>> initiateMpesa({
     required int leaseId,
     required num amount,
     String? phone,
   }) async {
-    final h = await _auth();
+    final headers = await TokenManager.authHeaders();
     final url = Uri.parse('${AppConfig.apiBaseUrl}/payments/mpesa/initiate');
-    final body = {
+
+    final payload = {
       'lease_id': leaseId,
-      'amount': amount,
-      if (phone != null && phone.isNotEmpty) 'phone': phone,
-    };
-    print('[PaymentService] POST $url body=$body');
-    final r = await http.post(url, headers: _json(h), body: jsonEncode(body));
-    print('[PaymentService] ← ${r.statusCode} ${r.body}');
-    if (r.statusCode == 200) {
-      final b = jsonDecode(r.body);
-      AppEvents.I.paymentActivity.add(null);
-      return (b is Map) ? b.cast<String, dynamic>() : <String, dynamic>{};
-    }
-    throw Exception('MPesa initiation failed: ${r.statusCode} ${r.body}');
+      'amount': amount.toDouble(),
+      'phone': phone,
+    }..removeWhere((k, v) => v == null);
+
+    print('[PaymentService] POST $url');
+    print('[PaymentService] payload: ${jsonEncode(payload)}');
+
+    final res = await http.post(
+      url,
+      headers: {'Content-Type': 'application/json', ...headers},
+      body: jsonEncode(payload),
+    );
+
+    print('[PaymentService] ← ${res.statusCode} ${res.body}');
+    return _decodeMapOrEmpty(res);
   }
 
-  // ---------- Receipts ----------
-  // Primary (aligned to backend): /payments/receipt/{payment_id}.pdf
-  static String receiptUrl(int paymentId) =>
-      '${AppConfig.apiBaseUrl}/payments/receipt/$paymentId.pdf';
+  // -----------------------------
+  // Reports / Payment status
+  // -----------------------------
+  static Future<Map<String, dynamic>> getStatusByProperty({
+    required int propertyId,
+    required String period,
+  }) async {
+    final headers = await TokenManager.authHeaders();
+    final url = Uri.parse('${AppConfig.apiBaseUrl}/reports/property/$propertyId/status?period=$period');
 
-  static Future<void> downloadReceiptPdf(int paymentId) async {
-    final h = await _auth();
-    final headers = {
-      ...h,
-      'Accept': 'application/pdf',
+    print('[PaymentService] GET $url');
+    final res = await http.get(url, headers: {
+      'Content-Type': 'application/json',
+      ...headers,
+    });
+
+    print('[PaymentService] ← ${res.statusCode} ${res.body}');
+    return _decodeMapOrEmpty(res);
+  }
+
+  // -----------------------------
+  // Record Cash / Manual Payment
+  // -----------------------------
+  /// ✅ Now matches your UI calls:
+  /// recordPayment(... period: ..., paidDate: ...)
+  static Future<Map<String, dynamic>> recordPayment({
+    required int leaseId,
+    required num amount,
+    String method = 'cash',
+    String? reference,
+    String? notes,
+
+    // your UI might call either of these:
+    String? paidDate,  // ✅ NEW (matches landlord_property_units.dart)
+    String? paidAtIso, // still supported
+
+    String? period,
+  }) async {
+    final headers = await TokenManager.authHeaders();
+    final url = Uri.parse('${AppConfig.apiBaseUrl}/payments/record');
+
+    // Prefer paidDate if provided, else paidAtIso
+    final payload = {
+      'lease_id': leaseId,
+      'amount': amount.toDouble(),
+      'method': method,
+      'reference': reference,
+      'notes': notes,
+      'paid_date': paidDate, // ✅ if backend expects date-only
+      'paid_at': paidDate == null ? paidAtIso : null, // avoid sending both
+      'period': period,
+    }..removeWhere((k, v) => v == null);
+
+    print('[PaymentService] POST $url');
+    print('[PaymentService] payload: ${jsonEncode(payload)}');
+
+    final res = await http.post(
+      url,
+      headers: {'Content-Type': 'application/json', ...headers},
+      body: jsonEncode(payload),
+    );
+
+    print('[PaymentService] ← ${res.statusCode} ${res.body}');
+    return _decodeMapOrEmpty(res);
+  }
+
+  // -----------------------------
+  // Reminders
+  // -----------------------------
+  static Future<void> sendReminder({
+    required int leaseId,
+    required String message,
+  }) async {
+    final headers = await TokenManager.authHeaders();
+    final url = Uri.parse('${AppConfig.apiBaseUrl}/payments/reminder');
+
+    final payload = {
+      'lease_id': leaseId,
+      'message': message,
     };
-    final u1 = Uri.parse(receiptUrl(paymentId));
-    // Legacy fallback if an older backend path is still live
-    final uLegacy = Uri.parse('${AppConfig.apiBaseUrl}/payments/mpesa/receipt/$paymentId.pdf');
-    // Optional alternative pattern fallback
-    final uAlt = Uri.parse('${AppConfig.apiBaseUrl}/payments/$paymentId/receipt.pdf');
 
-    print('[PaymentService] GET $u1');
-    var r = await http.get(u1, headers: headers);
-    print('[PaymentService] ← ${r.statusCode}');
-    if (r.statusCode == 200) {
-      final bytes = Uint8List.fromList(r.bodyBytes);
-      final blob = html.Blob([bytes], 'application/pdf');
-      final blobUrl = html.Url.createObjectUrlFromBlob(blob);
-      final anchor = html.AnchorElement(href: blobUrl)
-        ..download = 'receipt_$paymentId.pdf'
-        ..click();
-      html.Url.revokeObjectUrl(blobUrl);
-      return;
+    print('[PaymentService] POST $url');
+    final res = await http.post(
+      url,
+      headers: {'Content-Type': 'application/json', ...headers},
+      body: jsonEncode(payload),
+    );
+
+    print('[PaymentService] ← ${res.statusCode} ${res.body}');
+    if (res.statusCode != 200 && res.statusCode != 201 && res.statusCode != 204) {
+      throw Exception('Failed to send reminder: ${_errMsg(res)}');
     }
+  }
 
-    if (r.statusCode == 404 || r.statusCode == 422) {
-      print('[PaymentService] Fallback GET $uLegacy');
-      r = await http.get(uLegacy, headers: headers);
-      print('[PaymentService] ← ${r.statusCode}');
-      if (r.statusCode == 200) {
-        final bytes = Uint8List.fromList(r.bodyBytes);
-        final blob = html.Blob([bytes], 'application/pdf');
-        final blobUrl = html.Url.createObjectUrlFromBlob(blob);
-        final anchor = html.AnchorElement(href: blobUrl)
-          ..download = 'receipt_$paymentId.pdf'
-          ..click();
-        html.Url.revokeObjectUrl(blobUrl);
-        return;
-      }
+  static Future<void> sendRemindersBulk({
+    required int propertyId,
+    required String message,
+    String? period,
+  }) async {
+    final headers = await TokenManager.authHeaders();
+    final url = Uri.parse('${AppConfig.apiBaseUrl}/payments/reminders/bulk');
 
-      print('[PaymentService] Fallback GET $uAlt');
-      r = await http.get(uAlt, headers: headers);
-      print('[PaymentService] ← ${r.statusCode}');
-      if (r.statusCode == 200) {
-        final bytes = Uint8List.fromList(r.bodyBytes);
-        final blob = html.Blob([bytes], 'application/pdf');
-        final blobUrl = html.Url.createObjectUrlFromBlob(blob);
-        final anchor = html.AnchorElement(href: blobUrl)
-          ..download = 'receipt_$paymentId.pdf'
-          ..click();
-        html.Url.revokeObjectUrl(blobUrl);
-        return;
-      }
+    final payload = {
+      'property_id': propertyId,
+      'message': message,
+      'period': period,
+    }..removeWhere((k, v) => v == null);
+
+    print('[PaymentService] POST $url');
+    final res = await http.post(
+      url,
+      headers: {'Content-Type': 'application/json', ...headers},
+      body: jsonEncode(payload),
+    );
+
+    print('[PaymentService] ← ${res.statusCode} ${res.body}');
+    if (res.statusCode != 200 && res.statusCode != 201 && res.statusCode != 204) {
+      throw Exception('Failed to send bulk reminders: ${_errMsg(res)}');
     }
+  }
 
-    throw Exception('Failed to download receipt: ${r.statusCode} ${r.body}');
+  // -----------------------------
+  // Receipt PDF
+  // -----------------------------
+  static Future<Uint8List> downloadReceiptPdf(int id) async {
+    final headers = await TokenManager.authHeaders();
+    final url = Uri.parse('${AppConfig.apiBaseUrl}/payments/receipt/$id/pdf');
+
+    print('[PaymentService] GET $url');
+    final res = await http.get(url, headers: {
+      ...headers,
+    });
+
+    print('[PaymentService] ← ${res.statusCode}');
+    if (res.statusCode == 200) {
+      return res.bodyBytes;
+    }
+    throw Exception('Failed to download receipt PDF: ${_errMsg(res)}');
   }
 }

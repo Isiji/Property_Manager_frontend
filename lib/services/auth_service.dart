@@ -16,9 +16,16 @@ class AuthService {
     String? password,
     required String role,
     String? propertyCode,
-    int? unitId,            // preferred for tenant (more reliable)
-    String? unitNumber,     // optional alternative (supported by backend too)
-    String? idNumber,       // optional National ID
+    int? unitId,
+    String? unitNumber,
+    String? idNumber,
+
+    // ✅ NEW: manager org type + agency extras
+    String? managerType,     // "individual" | "agency"
+    String? companyName,
+    String? contactPerson,
+    String? officePhone,
+    String? officeEmail,
   }) async {
     final r = role.trim().toLowerCase();
 
@@ -47,11 +54,21 @@ class AuthService {
       'email': (email == null || email.trim().isEmpty) ? null : email.trim(),
       'password': (password == null || password.trim().isEmpty) ? null : password.trim(),
       'role': r,
-      // Backend expects snake_case
+
+      // tenant fields
       'property_code': (propertyCode == null || propertyCode.trim().isEmpty) ? null : propertyCode.trim(),
       'unit_id': unitId,
       'unit_number': (unitNumber == null || unitNumber.trim().isEmpty) ? null : unitNumber.trim(),
+
+      // id number
       'id_number': (idNumber == null || idNumber.trim().isEmpty) ? null : idNumber.trim(),
+
+      // ✅ manager/agency extras (backend can ignore if not implemented yet)
+      'manager_type': (managerType == null || managerType.trim().isEmpty) ? null : managerType.trim(),
+      'company_name': (companyName == null || companyName.trim().isEmpty) ? null : companyName.trim(),
+      'contact_person': (contactPerson == null || contactPerson.trim().isEmpty) ? null : contactPerson.trim(),
+      'office_phone': (officePhone == null || officePhone.trim().isEmpty) ? null : officePhone.trim(),
+      'office_email': (officeEmail == null || officeEmail.trim().isEmpty) ? null : officeEmail.trim(),
     }..removeWhere((_, v) => v == null);
 
     print('➡️ Sending to: $url');
@@ -87,11 +104,9 @@ class AuthService {
     final r = role.trim().toLowerCase();
     final url = Uri.parse(AppConfig.loginEndpoint);
 
-    // Tenant login passwordless allowed (backend allows null password for tenant)
     final payload = <String, dynamic>{
       'phone': phone.trim(),
       'role': r,
-      // For non-tenant roles password must be present; for tenant it can be null.
       'password': (password == null || password.trim().isEmpty) ? null : password.trim(),
     }..removeWhere((_, v) => v == null);
 

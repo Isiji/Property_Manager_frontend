@@ -13,19 +13,31 @@ class RegisterScreen extends StatefulWidget {
 class _RegisterScreenState extends State<RegisterScreen> {
   final _formKey = GlobalKey<FormState>();
 
+  // Shared inputs (labels change depending on manager type)
   final _nameController = TextEditingController();
   final _phoneController = TextEditingController();
-  final _emailController = TextEditingController();     // optional
-  final _idController = TextEditingController();        // optional National ID
-  final _passwordController = TextEditingController();  // required for non-tenant
+  final _emailController = TextEditingController(); // optional
+  final _idController = TextEditingController(); // optional National ID
+  final _passwordController = TextEditingController(); // required for non-tenant
 
-  final _propertyCodeController = TextEditingController(); // tenant-only
-  final _unitLabelController = TextEditingController();    // tenant-only (A2, Simba, Nyayo...)
+  // Tenant-only
+  final _propertyCodeController = TextEditingController();
+  final _unitLabelController = TextEditingController();
+
+  // Agency optional extras
+  final _contactPersonController = TextEditingController(); // optional
+  final _officePhoneController = TextEditingController(); // optional override
+  final _officeEmailController = TextEditingController(); // optional override
 
   String _selectedRole = 'tenant';
+  String _managerType = 'individual'; // individual | agency
   bool _loading = false;
 
   final List<String> _roles = ['tenant', 'landlord', 'manager', 'admin'];
+
+  bool get _isTenant => _selectedRole == 'tenant';
+  bool get _isManager => _selectedRole == 'manager';
+  bool get _isAgency => _isManager && _managerType == 'agency';
 
   @override
   void dispose() {
@@ -34,9 +46,40 @@ class _RegisterScreenState extends State<RegisterScreen> {
     _emailController.dispose();
     _idController.dispose();
     _passwordController.dispose();
+
     _propertyCodeController.dispose();
     _unitLabelController.dispose();
+
+    _contactPersonController.dispose();
+    _officePhoneController.dispose();
+    _officeEmailController.dispose();
     super.dispose();
+  }
+
+  void _onRoleChanged(String? val) {
+    setState(() {
+      _selectedRole = val ?? 'tenant';
+
+      // clear tenant fields if not tenant
+      if (!_isTenant) {
+        _propertyCodeController.clear();
+        _unitLabelController.clear();
+      }
+
+      // clear manager extras if not manager
+      if (!_isManager) {
+        _managerType = 'individual';
+        _contactPersonController.clear();
+        _officePhoneController.clear();
+        _officeEmailController.clear();
+      }
+    });
+  }
+
+  void _onManagerTypeChanged(String? v) {
+    setState(() {
+      _managerType = v ?? 'individual';
+    });
   }
 
   Future<void> _register() async {
@@ -48,8 +91,26 @@ class _RegisterScreenState extends State<RegisterScreen> {
       final email = _emailController.text.trim().isEmpty ? null : _emailController.text.trim();
       final idNumber = _idController.text.trim().isEmpty ? null : _idController.text.trim();
 
-      final propertyCode = _selectedRole == 'tenant' ? _propertyCodeController.text.trim() : null;
-      final unitNumber = _selectedRole == 'tenant' ? _unitLabelController.text.trim() : null;
+      // Tenant
+      final propertyCode = _isTenant ? _propertyCodeController.text.trim() : null;
+      final unitNumber = _isTenant ? _unitLabelController.text.trim() : null;
+
+      // Agency mapping (avoid double entry)
+      final companyName = _isAgency ? _nameController.text.trim() : null;
+
+      final companyOfficePhone = _isAgency
+          ? (_officePhoneController.text.trim().isEmpty
+              ? _phoneController.text.trim()
+              : _officePhoneController.text.trim())
+          : null;
+
+      final companyOfficeEmail = _isAgency
+          ? (_officeEmailController.text.trim().isEmpty ? email : _officeEmailController.text.trim())
+          : null;
+
+      final contactPerson = _isAgency
+          ? (_contactPersonController.text.trim().isEmpty ? null : _contactPersonController.text.trim())
+          : null;
 
       // 1) Register
       await AuthService.registerUser(
@@ -57,18 +118,25 @@ class _RegisterScreenState extends State<RegisterScreen> {
         phone: _phoneController.text.trim(),
         email: email,
         idNumber: idNumber,
-        password: _selectedRole == 'tenant'
+        password: _isTenant
             ? (_passwordController.text.trim().isEmpty ? null : _passwordController.text.trim())
             : _passwordController.text.trim(),
         role: _selectedRole,
         propertyCode: propertyCode,
-        unitNumber: unitNumber, // ✅ manual unit entry
+        unitNumber: unitNumber,
+
+        // manager / agency extras
+        managerType: _isManager ? _managerType : null, // ✅ no unused local variable now
+        companyName: companyName,
+        contactPerson: contactPerson,
+        officePhone: companyOfficePhone,
+        officeEmail: (companyOfficeEmail?.trim().isEmpty == true) ? null : companyOfficeEmail,
       );
 
       // 2) Auto-login
       final login = await AuthService.loginUser(
         phone: _phoneController.text.trim(),
-        password: _selectedRole == 'tenant'
+        password: _isTenant
             ? (_passwordController.text.trim().isEmpty ? null : _passwordController.text.trim())
             : _passwordController.text.trim(),
         role: _selectedRole,
@@ -110,6 +178,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+
+    final nameLabel = _isAgency ? "Company Name" : "Full Name";
+    final phoneLabel = _isAgency ? "Company Phone" : "Phone Number";
+    final emailLabel = _isAgency ? "Company Email (optional)" : "Email (optional)";
+
     return Scaffold(
       body: Container(
         decoration: const BoxDecoration(
@@ -142,12 +215,66 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       ),
                       const SizedBox(height: 20),
 
-                      _requiredField(_nameController, "Full Name", Icons.person),
+                      // ✅ Role FIRST
+                      DropdownButtonFormField<String>(
+                        initialValue: _selectedRole,
+                        items: _roles
+                            .map((r) => DropdownMenuItem(
+                                  value: r,
+                                  child: Text(r[0].toUpperCase() + r.substring(1)),
+                                ))
+                            .toList(),
+                        onChanged: _onRoleChanged,
+                        decoration: const InputDecoration(
+                          labelText: "Account type",
+                          prefixIcon: Icon(Icons.work_outline),
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+
+                      // ✅ Manager type SECOND (only if manager)
+                      if (_isManager) ...[
+                        const SizedBox(height: 12),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            'Manager type',
+                            style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: RadioListTile<String>(
+                                value: 'individual',
+                                groupValue: _managerType,
+                                dense: true,
+                                title: const Text('Individual'),
+                                onChanged: _onManagerTypeChanged,
+                              ),
+                            ),
+                            Expanded(
+                              child: RadioListTile<String>(
+                                value: 'agency',
+                                groupValue: _managerType,
+                                dense: true,
+                                title: const Text('Agency'),
+                                onChanged: _onManagerTypeChanged,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+
+                      const SizedBox(height: 12),
+
+                      _requiredField(_nameController, nameLabel, _isAgency ? Icons.business : Icons.person),
                       const SizedBox(height: 10),
-                      _requiredField(_phoneController, "Phone Number", Icons.phone),
+                      _requiredField(_phoneController, phoneLabel, Icons.phone),
 
                       const SizedBox(height: 10),
-                      _optionalField(_emailController, "Email (optional)", Icons.email),
+                      _optionalField(_emailController, emailLabel, Icons.email),
                       const SizedBox(height: 10),
                       _optionalField(_idController, "National ID (optional)", Icons.badge),
 
@@ -161,7 +288,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                           border: OutlineInputBorder(),
                         ),
                         validator: (v) {
-                          if (_selectedRole == 'tenant') return null; // optional for tenant
+                          if (_isTenant) return null;
                           if (v == null || v.trim().isEmpty) {
                             return 'Password is required for $_selectedRole';
                           }
@@ -169,44 +296,20 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         },
                       ),
 
-                      const SizedBox(height: 10),
-                      DropdownButtonFormField<String>(
-                        value: _selectedRole,
-                        items: _roles
-                            .map((r) => DropdownMenuItem(
-                                  value: r,
-                                  child: Text(r[0].toUpperCase() + r.substring(1)),
-                                ))
-                            .toList(),
-                        onChanged: (val) {
-                          setState(() {
-                            _selectedRole = val ?? 'tenant';
-                            if (_selectedRole != 'tenant') {
-                              _propertyCodeController.clear();
-                              _unitLabelController.clear();
-                            }
-                          });
-                        },
-                        decoration: const InputDecoration(
-                          labelText: "Select Role",
-                          prefixIcon: Icon(Icons.work_outline),
-                          border: OutlineInputBorder(),
-                        ),
-                      ),
+                      if (_isTenant) ...[
+                        const SizedBox(height: 10),
+                        _requiredField(_propertyCodeController, "Property Code", Icons.home_work_outlined),
+                        const SizedBox(height: 10),
+                        _requiredField(_unitLabelController, "Unit Name/Number (e.g., A2, Simba, Nyayo)", Icons.apartment),
+                      ],
 
-                      if (_selectedRole == 'tenant') ...[
+                      if (_isAgency) ...[
+                        const SizedBox(height: 12),
+                        _optionalField(_contactPersonController, "Contact Person (optional)", Icons.person_outline),
                         const SizedBox(height: 10),
-                        _requiredField(
-                          _propertyCodeController,
-                          "Property Code",
-                          Icons.home_work_outlined,
-                        ),
+                        _optionalField(_officePhoneController, "Office Phone (optional override)", Icons.call),
                         const SizedBox(height: 10),
-                        _requiredField(
-                          _unitLabelController,
-                          "Unit Name/Number (e.g., A2, Simba, Nyayo)",
-                          Icons.apartment,
-                        ),
+                        _optionalField(_officeEmailController, "Office Email (optional override)", Icons.alternate_email),
                       ],
 
                       const SizedBox(height: 25),
@@ -240,17 +343,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
     );
   }
 
-  Widget _requiredField(
-    TextEditingController c,
-    String label,
-    IconData icon, {
-    void Function(String)? onChanged,
-    void Function(String)? onFieldSubmitted,
-  }) {
+  Widget _requiredField(TextEditingController c, String label, IconData icon) {
     return TextFormField(
       controller: c,
-      onChanged: onChanged,
-      onFieldSubmitted: onFieldSubmitted,
       validator: (v) => (v == null || v.trim().isEmpty) ? "$label cannot be empty" : null,
       decoration: InputDecoration(
         labelText: label,
