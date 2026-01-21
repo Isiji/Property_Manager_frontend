@@ -21,6 +21,10 @@ import 'package:property_manager_frontend/screens/lease/lease_view.dart';
 import 'package:property_manager_frontend/screens/manager/manager_properties.dart';
 import 'package:property_manager_frontend/screens/manager/manager_tenants.dart';
 
+// ✅ NEW imports
+import 'package:property_manager_frontend/screens/manager/manager_dashboard_router.dart';
+import 'package:property_manager_frontend/screens/manager/agency_dashboard.dart';
+
 void main() {
   runApp(
     ChangeNotifierProvider(
@@ -67,7 +71,7 @@ class PropSmartApp extends StatelessWidget {
         '/settings': (_) => const SettingsScreen(),
         '/tenant_home': (_) => const TenantHome(),
 
-        // ✅ One common dashboard shell
+        // ✅ One common dashboard shell (landlord/admin/tenant)
         '/dashboard': (_) => const DashboardShell(),
 
         '/lease_view': (ctx) => const LeaseViewScreen(),
@@ -77,16 +81,23 @@ class PropSmartApp extends StatelessWidget {
 
         // ✅ Route aliases (old routes still work)
         '/landlord_dashboard': (_) => const DashboardShell(),
-        '/manager_dashboard': (_) => const DashboardShell(),
+
+        // ✅ CHANGED: manager_dashboard must NOT go to DashboardShell
+        // It must route agency vs individual
+        '/manager_dashboard': (_) => const ManagerDashboardRouter(),
+
         '/admin_dashboard': (_) => const DashboardShell(),
         '/tenant_dashboard': (_) => const DashboardShell(),
+
+        // ✅ NEW: agency landing
+        '/agency_dashboard': (_) => const AgencyDashboard(),
 
         '/landlord_payouts': (_) => const LandlordPayoutsScreen(),
         '/landlord_overview': (_) => const LandlordOverview(),
 
         // ✅ Manager screens
         '/manager_properties': (_) => const ManagerPropertiesScreen(),
-        
+
         '/manager_payments': (context) {
           final args = ModalRoute.of(context)!.settings.arguments as Map?;
           final propertyId = (args?['propertyId'] as num?)?.toInt() ?? 0;
@@ -166,9 +177,18 @@ class _LaunchDeciderState extends State<LaunchDecider> {
     if (!mounted) return;
 
     if (session != null && !session.isExpired) {
-      debugPrint('[LaunchDecider] Logged in as ${session.role} → Navigating to /dashboard');
+      final role = session.role;
+      debugPrint('[LaunchDecider] Logged in as $role');
+
+      // ✅ IMPORTANT: managers must go through manager router
+      if (role == 'manager') {
+        Navigator.of(context).pushReplacementNamed('/manager_dashboard');
+        return;
+      }
+
+      // ✅ others use the common dashboard shell
       Navigator.of(context).pushReplacementNamed('/dashboard', arguments: {
-        'role': session.role,
+        'role': role,
         'userId': session.userId,
       });
     } else {
