@@ -12,6 +12,7 @@ import 'package:property_manager_frontend/screens/common/maintenance_inbox.dart'
 import 'package:property_manager_frontend/screens/landlord/landlord_property_units.dart';
 import 'package:property_manager_frontend/screens/landlord/landlord_overview.dart';
 import 'package:property_manager_frontend/screens/manager/manager_payments.dart';
+import 'package:property_manager_frontend/screens/agency/agency_agents.dart';
 
 import 'package:property_manager_frontend/theme/app_theme.dart';
 import 'package:property_manager_frontend/providers/theme_provider.dart';
@@ -90,7 +91,7 @@ class PropSmartApp extends StatelessWidget {
         '/tenant_dashboard': (_) => const DashboardShell(),
 
         // ✅ NEW: agency landing
-        '/agency_dashboard': (_) => const AgencyDashboard(),
+        '/agency_dashboard': (_) => const DashboardShell(),
 
         '/landlord_payouts': (_) => const LandlordPayoutsScreen(),
         '/landlord_overview': (_) => const LandlordOverview(),
@@ -116,6 +117,7 @@ class PropSmartApp extends StatelessWidget {
             initialPeriod: period,
           );
         },
+        '/agency_agents': (_) => const AgencyAgentsScreen(),
 
         '/manager_tenants': (context) {
           final args = ModalRoute.of(context)!.settings.arguments as Map?;
