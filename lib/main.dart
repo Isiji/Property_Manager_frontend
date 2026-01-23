@@ -25,6 +25,7 @@ import 'package:property_manager_frontend/screens/manager/manager_tenants.dart';
 // ✅ NEW imports
 import 'package:property_manager_frontend/screens/manager/manager_dashboard_router.dart';
 import 'package:property_manager_frontend/screens/manager/agency_dashboard.dart';
+import 'package:property_manager_frontend/screens/agency/agency_agents.dart';
 
 void main() {
   runApp(
