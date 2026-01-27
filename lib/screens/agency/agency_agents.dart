@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
 import 'package:property_manager_frontend/services/agency_service.dart';
+import 'package:property_manager_frontend/services/manager_service.dart';
 import 'package:property_manager_frontend/services/property_service.dart';
 
 class AgencyAgentsScreen extends StatefulWidget {
@@ -12,17 +13,25 @@ class AgencyAgentsScreen extends StatefulWidget {
   State<AgencyAgentsScreen> createState() => _AgencyAgentsScreenState();
 }
 
-class _AgencyAgentsScreenState extends State<AgencyAgentsScreen> with SingleTickerProviderStateMixin {
+class _AgencyAgentsScreenState extends State<AgencyAgentsScreen>
+    with SingleTickerProviderStateMixin {
   late final TabController _tabs;
 
   bool _loadingStaff = true;
   bool _loadingAgents = true;
 
+  String? _staffError;
+  String? _agentsError;
+
   List<dynamic> _staff = [];
-  List<dynamic> _agents = []; // links {agent_manager_id, status...}
+  List<dynamic> _agents = []; // link rows: {agent_manager_id, status, ...}
 
   List<dynamic> _properties = [];
   bool _loadingProperties = false;
+
+  // cache agent org profile by agent_manager_id
+  final Map<int, Map<String, dynamic>> _agentOrgCache = {};
+  final Set<int> _agentOrgLoading = {};
 
   @override
   void initState() {
@@ -37,6 +46,11 @@ class _AgencyAgentsScreenState extends State<AgencyAgentsScreen> with SingleTick
     super.dispose();
   }
 
+  void _snack(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
   Future<void> _loadAll() async {
     await Future.wait([
       _loadStaff(),
@@ -46,45 +60,85 @@ class _AgencyAgentsScreenState extends State<AgencyAgentsScreen> with SingleTick
   }
 
   Future<void> _loadStaff() async {
-    setState(() => _loadingStaff = true);
+    setState(() {
+      _loadingStaff = true;
+      _staffError = null;
+    });
+
     try {
       final data = await AgencyService.listStaff();
+      if (!mounted) return;
       setState(() => _staff = data);
     } catch (e) {
-      _snack('Failed to load staff: $e');
+      final msg = e.toString();
+      // Friendly hint for the common 403
+      final hint = msg.contains('403')
+          ? 'Access denied (403). Only agency admin/owner can view staff.'
+          : msg;
+      if (!mounted) return;
+      setState(() => _staffError = hint);
     } finally {
-      setState(() => _loadingStaff = false);
+      if (mounted) setState(() => _loadingStaff = false);
     }
   }
 
   Future<void> _loadAgents() async {
-    setState(() => _loadingAgents = true);
+    setState(() {
+      _loadingAgents = true;
+      _agentsError = null;
+    });
+
     try {
       final data = await AgencyService.listLinkedAgents();
+      if (!mounted) return;
       setState(() => _agents = data);
+
+      // Kick off background fetch of each agent org profile (best-effort)
+      for (final raw in data) {
+        final m = (raw is Map) ? Map<String, dynamic>.from(raw) : <String, dynamic>{};
+        final agentId = (m['agent_manager_id'] as num?)?.toInt() ?? 0;
+        if (agentId > 0) {
+          _prefetchAgentOrg(agentId);
+        }
+      }
     } catch (e) {
-      _snack('Failed to load agents: $e');
+      if (!mounted) return;
+      setState(() => _agentsError = e.toString());
     } finally {
-      setState(() => _loadingAgents = false);
+      if (mounted) setState(() => _loadingAgents = false);
     }
   }
 
   Future<void> _loadProperties() async {
     setState(() => _loadingProperties = true);
     try {
-      final props = await PropertyService.getMyVisibleProperties();
+      final props = await PropertyService.getMyVisibleProperties(); // uses /properties/me
+      if (!mounted) return;
       setState(() => _properties = props);
     } catch (e) {
-      // not fatal, but assignment dialogs need it
       print('⚠️ failed to load properties for assignment: $e');
     } finally {
-      setState(() => _loadingProperties = false);
+      if (mounted) setState(() => _loadingProperties = false);
     }
   }
 
-  void _snack(String msg) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  Future<void> _prefetchAgentOrg(int agentManagerId) async {
+    if (_agentOrgCache.containsKey(agentManagerId)) return;
+    if (_agentOrgLoading.contains(agentManagerId)) return;
+
+    _agentOrgLoading.add(agentManagerId);
+    try {
+      final org = await ManagerService.getManager(agentManagerId);
+      if (!mounted) return;
+      setState(() {
+        _agentOrgCache[agentManagerId] = org;
+      });
+    } catch (e) {
+      // non-fatal: still show the agentId card
+      print('⚠️ failed to load agent org $agentManagerId: $e');
+    } finally {
+      _agentOrgLoading.remove(agentManagerId);
+    }
   }
 
   // -----------------------------
@@ -164,7 +218,7 @@ class _AgencyAgentsScreenState extends State<AgencyAgentsScreen> with SingleTick
         idNumber: idCtrl.text.trim().isEmpty ? null : idCtrl.text.trim(),
         staffRole: staffRole,
       );
-      _snack('Staff created successfully');
+      _snack('Staff created');
       await _loadStaff();
     } catch (e) {
       _snack('Create staff failed: $e');
@@ -196,7 +250,7 @@ class _AgencyAgentsScreenState extends State<AgencyAgentsScreen> with SingleTick
 
   Future<void> _assignPropertyToStaff(int staffUserId, String staffName) async {
     if (_loadingProperties) {
-      _snack('Loading properties… try again in a second.');
+      _snack('Loading properties… try again shortly.');
       return;
     }
     if (_properties.isEmpty) {
@@ -256,7 +310,7 @@ class _AgencyAgentsScreenState extends State<AgencyAgentsScreen> with SingleTick
     final ok = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('Link agent (external manager)'),
+        title: const Text('Link external agent'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -269,13 +323,10 @@ class _AgencyAgentsScreenState extends State<AgencyAgentsScreen> with SingleTick
             TextField(
               controller: idCtrl,
               keyboardType: TextInputType.number,
-              decoration: const InputDecoration(labelText: 'OR Agent manager ID'),
+              decoration: const InputDecoration(labelText: 'OR Agent Manager ID'),
             ),
             const SizedBox(height: 8),
-            const Text(
-              'Use phone OR id. Phone is easiest.',
-              style: TextStyle(fontSize: 12),
-            ),
+            Text('Tip: phone is easiest.', style: Theme.of(context).textTheme.bodySmall),
           ],
         ),
         actions: [
@@ -297,8 +348,11 @@ class _AgencyAgentsScreenState extends State<AgencyAgentsScreen> with SingleTick
     }
 
     try {
-      await AgencyService.linkAgent(agentPhone: phone.isEmpty ? null : phone, agentManagerId: agentId);
-      _snack('Agent linked successfully');
+      await AgencyService.linkAgent(
+        agentPhone: phone.isEmpty ? null : phone,
+        agentManagerId: agentId,
+      );
+      _snack('Agent linked');
       await _loadAgents();
     } catch (e) {
       _snack('Link failed: $e');
@@ -310,7 +364,7 @@ class _AgencyAgentsScreenState extends State<AgencyAgentsScreen> with SingleTick
       context: context,
       builder: (_) => AlertDialog(
         title: const Text('Unlink agent'),
-        content: const Text('Unlink this agent from your agency? They will no longer see your assigned properties.'),
+        content: const Text('Unlink this agent from your agency?'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
           FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Unlink')),
@@ -330,7 +384,7 @@ class _AgencyAgentsScreenState extends State<AgencyAgentsScreen> with SingleTick
 
   Future<void> _assignPropertyToExternalAgent(int agentManagerId) async {
     if (_loadingProperties) {
-      _snack('Loading properties… try again in a second.');
+      _snack('Loading properties… try again shortly.');
       return;
     }
     if (_properties.isEmpty) {
@@ -427,27 +481,28 @@ class _AgencyAgentsScreenState extends State<AgencyAgentsScreen> with SingleTick
       body: TabBarView(
         controller: _tabs,
         children: [
-          // ---------------- STAFF TAB ----------------
+          // STAFF TAB
           RefreshIndicator(
             onRefresh: _loadStaff,
             child: ListView(
               physics: const AlwaysScrollableScrollPhysics(),
               padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
               children: [
-                _heroCard(
-                  t,
-                  icon: LucideIcons.users,
-                  title: 'Staff',
-                  subtitle: 'Create staff accounts, assign properties, deactivate access.',
-                ),
+                _hero(t,
+                    icon: LucideIcons.users,
+                    title: 'Staff',
+                    subtitle: 'Create staff accounts, assign properties, deactivate access.'),
                 const SizedBox(height: 12),
+
                 if (_loadingStaff)
                   const Padding(
                     padding: EdgeInsets.all(28),
                     child: Center(child: CircularProgressIndicator()),
                   )
+                else if (_staffError != null)
+                  _errorCard(t, _staffError!)
                 else if (_staff.isEmpty)
-                  _emptyState(icon: LucideIcons.userX, text: 'No staff yet.\nTap "Add staff".')
+                  _empty(t, icon: LucideIcons.userX, text: 'No staff yet.\nTap “Add staff”.')
                 else
                   ..._staff.map((raw) {
                     final m = (raw is Map) ? Map<String, dynamic>.from(raw) : <String, dynamic>{};
@@ -461,7 +516,7 @@ class _AgencyAgentsScreenState extends State<AgencyAgentsScreen> with SingleTick
                       margin: const EdgeInsets.only(bottom: 12),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                       child: ListTile(
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                         leading: Container(
                           width: 46,
                           height: 46,
@@ -495,60 +550,124 @@ class _AgencyAgentsScreenState extends State<AgencyAgentsScreen> with SingleTick
             ),
           ),
 
-          // ---------------- AGENTS TAB ----------------
+          // AGENTS TAB
           RefreshIndicator(
             onRefresh: _loadAgents,
             child: ListView(
               physics: const AlwaysScrollableScrollPhysics(),
               padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
               children: [
-                _heroCard(
-                  t,
-                  icon: LucideIcons.userCheck,
-                  title: 'External Agents',
-                  subtitle: 'Link existing managers as agents. Assign properties and unlink when needed.',
-                ),
+                _hero(t,
+                    icon: LucideIcons.userCheck,
+                    title: 'External Agents',
+                    subtitle: 'Link existing managers as agents. Assign properties and unlink when needed.'),
                 const SizedBox(height: 12),
+
                 if (_loadingAgents)
                   const Padding(
                     padding: EdgeInsets.all(28),
                     child: Center(child: CircularProgressIndicator()),
                   )
+                else if (_agentsError != null)
+                  _errorCard(t, _agentsError!)
                 else if (_agents.isEmpty)
-                  _emptyState(icon: LucideIcons.link2Off, text: 'No linked agents yet.\nTap "Link agent".')
+                  _empty(t, icon: LucideIcons.link2Off, text: 'No linked agents yet.\nTap “Link agent”.')
                 else
                   ..._agents.map((raw) {
                     final m = (raw is Map) ? Map<String, dynamic>.from(raw) : <String, dynamic>{};
                     final agentId = (m['agent_manager_id'] as num?)?.toInt() ?? 0;
                     final status = (m['status'] ?? 'active').toString();
 
+                    final org = _agentOrgCache[agentId];
+                    final orgType = (org?['type'] ?? '').toString();
+                    final displayName = _prettyOrgName(org);
+                    final phone = (org?['phone'] ?? org?['office_phone'] ?? '—').toString();
+                    final email = (org?['email'] ?? org?['office_email'] ?? '').toString();
+
+                    final isLoadingOrg = _agentOrgLoading.contains(agentId);
+
                     return Card(
                       margin: const EdgeInsets.only(bottom: 12),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                      child: ListTile(
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                        leading: Container(
-                          width: 46,
-                          height: 46,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: t.colorScheme.primary.withOpacity(.12),
-                          ),
-                          child: Icon(LucideIcons.userCheck, color: t.colorScheme.primary),
-                        ),
-                        title: Text(
-                          'Agent Manager ID: $agentId',
-                          style: t.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w900),
-                        ),
-                        subtitle: Text('status: $status'),
-                        trailing: PopupMenuButton<String>(
-                          onSelected: (key) {
-                            if (key == 'assign') _assignPropertyToExternalAgent(agentId);
-                            if (key == 'unlink') _unlinkAgent(agentId);
-                          },
-                          itemBuilder: (_) => const [
-                            PopupMenuItem(value: 'assign', child: Text('Assign property')),
-                            PopupMenuItem(value: 'unlink', child: Text('Unlink agent')),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Container(
+                              width: 46,
+                              height: 46,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: t.colorScheme.primary.withOpacity(.12),
+                              ),
+                              child: Icon(LucideIcons.userCheck, color: t.colorScheme.primary),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          displayName.isEmpty ? 'Agent Manager #$agentId' : displayName,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: t.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w900),
+                                        ),
+                                      ),
+                                      if (isLoadingOrg)
+                                        Padding(
+                                          padding: const EdgeInsets.only(left: 8),
+                                          child: SizedBox(
+                                            width: 14,
+                                            height: 14,
+                                            child: CircularProgressIndicator(strokeWidth: 2, color: t.hintColor),
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    [
+                                      if (orgType.isNotEmpty) orgType,
+                                      'status: $status',
+                                    ].join(' • '),
+                                    style: t.textTheme.bodySmall?.copyWith(color: t.hintColor),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Wrap(
+                                    spacing: 10,
+                                    runSpacing: 6,
+                                    children: [
+                                      _chip(t, LucideIcons.phone, phone),
+                                      if (email.isNotEmpty) _chip(t, LucideIcons.mail, email),
+                                      _chip(t, LucideIcons.hash, 'id: $agentId'),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 10),
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: OutlinedButton.icon(
+                                          onPressed: agentId <= 0 ? null : () => _assignPropertyToExternalAgent(agentId),
+                                          icon: const Icon(LucideIcons.building2, size: 16),
+                                          label: const Text('Assign property'),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 10),
+                                      IconButton(
+                                        tooltip: 'Unlink agent',
+                                        onPressed: agentId <= 0 ? null : () => _unlinkAgent(agentId),
+                                        icon: const Icon(LucideIcons.unlink),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            ),
                           ],
                         ),
                       ),
@@ -562,7 +681,36 @@ class _AgencyAgentsScreenState extends State<AgencyAgentsScreen> with SingleTick
     );
   }
 
-  Widget _heroCard(ThemeData t, {required IconData icon, required String title, required String subtitle}) {
+  String _prettyOrgName(Map<String, dynamic>? org) {
+    if (org == null) return '';
+    final type = (org['type'] ?? '').toString().toLowerCase();
+    if (type == 'agency') {
+      final company = (org['company_name'] ?? '').toString().trim();
+      if (company.isNotEmpty) return company;
+    }
+    return (org['name'] ?? '').toString().trim();
+  }
+
+  Widget _chip(ThemeData t, IconData icon, String text) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: t.dividerColor.withOpacity(.25)),
+        color: t.colorScheme.surface,
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: t.hintColor),
+          const SizedBox(width: 6),
+          Text(text, style: t.textTheme.bodySmall),
+        ],
+      ),
+    );
+  }
+
+  Widget _hero(ThemeData t, {required IconData icon, required String title, required String subtitle}) {
     return Container(
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(18),
@@ -574,8 +722,8 @@ class _AgencyAgentsScreenState extends State<AgencyAgentsScreen> with SingleTick
         child: Row(
           children: [
             Container(
-              width: 50,
-              height: 50,
+              width: 52,
+              height: 52,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 color: t.colorScheme.primary.withOpacity(.14),
@@ -605,15 +753,37 @@ class _AgencyAgentsScreenState extends State<AgencyAgentsScreen> with SingleTick
     );
   }
 
-  Widget _emptyState({required IconData icon, required String text}) {
+  Widget _empty(ThemeData t, {required IconData icon, required String text}) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 30),
       child: Column(
         children: [
-          Icon(icon, size: 52, color: Colors.grey),
+          Icon(icon, size: 56, color: Colors.grey),
           const SizedBox(height: 10),
-          Text(text, textAlign: TextAlign.center, style: Theme.of(context).textTheme.bodyMedium),
+          Text(text, textAlign: TextAlign.center, style: t.textTheme.bodyMedium?.copyWith(color: t.hintColor)),
         ],
+      ),
+    );
+  }
+
+  Widget _errorCard(ThemeData t, String message) {
+    return Card(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(LucideIcons.alertTriangle, color: t.colorScheme.error),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                message,
+                style: t.textTheme.bodyMedium?.copyWith(height: 1.25),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
