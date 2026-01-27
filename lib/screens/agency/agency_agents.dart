@@ -37,6 +37,9 @@ class _AgencyAgentsScreenState extends State<AgencyAgentsScreen>
   void initState() {
     super.initState();
     _tabs = TabController(length: 2, vsync: this);
+    _tabs.addListener(() {
+      if (mounted) setState(() {});
+    });
     _loadAll();
   }
 
@@ -71,7 +74,6 @@ class _AgencyAgentsScreenState extends State<AgencyAgentsScreen>
       setState(() => _staff = data);
     } catch (e) {
       final msg = e.toString();
-      // Friendly hint for the common 403
       final hint = msg.contains('403')
           ? 'Access denied (403). Only agency admin/owner can view staff.'
           : msg;
@@ -93,13 +95,12 @@ class _AgencyAgentsScreenState extends State<AgencyAgentsScreen>
       if (!mounted) return;
       setState(() => _agents = data);
 
-      // Kick off background fetch of each agent org profile (best-effort)
       for (final raw in data) {
-        final m = (raw is Map) ? Map<String, dynamic>.from(raw) : <String, dynamic>{};
+        final m = (raw is Map)
+            ? Map<String, dynamic>.from(raw)
+            : <String, dynamic>{};
         final agentId = (m['agent_manager_id'] as num?)?.toInt() ?? 0;
-        if (agentId > 0) {
-          _prefetchAgentOrg(agentId);
-        }
+        if (agentId > 0) _prefetchAgentOrg(agentId);
       }
     } catch (e) {
       if (!mounted) return;
@@ -112,7 +113,7 @@ class _AgencyAgentsScreenState extends State<AgencyAgentsScreen>
   Future<void> _loadProperties() async {
     setState(() => _loadingProperties = true);
     try {
-      final props = await PropertyService.getMyVisibleProperties(); // uses /properties/me
+      final props = await PropertyService.getMyVisibleProperties(); // /properties/me
       if (!mounted) return;
       setState(() => _properties = props);
     } catch (e) {
@@ -134,7 +135,6 @@ class _AgencyAgentsScreenState extends State<AgencyAgentsScreen>
         _agentOrgCache[agentManagerId] = org;
       });
     } catch (e) {
-      // non-fatal: still show the agentId card
       print('⚠️ failed to load agent org $agentManagerId: $e');
     } finally {
       _agentOrgLoading.remove(agentManagerId);
@@ -160,17 +160,27 @@ class _AgencyAgentsScreenState extends State<AgencyAgentsScreen>
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Full name')),
+              TextField(
+                controller: nameCtrl,
+                decoration: const InputDecoration(labelText: 'Full name'),
+              ),
               const SizedBox(height: 10),
               TextField(
                 controller: phoneCtrl,
                 keyboardType: TextInputType.phone,
-                decoration: const InputDecoration(labelText: 'Phone (07.. / +254..)'),
+                decoration:
+                    const InputDecoration(labelText: 'Phone (07.. / +254..)'),
               ),
               const SizedBox(height: 10),
-              TextField(controller: emailCtrl, decoration: const InputDecoration(labelText: 'Email (optional)')),
+              TextField(
+                controller: emailCtrl,
+                decoration: const InputDecoration(labelText: 'Email (optional)'),
+              ),
               const SizedBox(height: 10),
-              TextField(controller: idCtrl, decoration: const InputDecoration(labelText: 'ID Number (optional)')),
+              TextField(
+                controller: idCtrl,
+                decoration: const InputDecoration(labelText: 'ID Number (optional)'),
+              ),
               const SizedBox(height: 10),
               TextField(
                 controller: passCtrl,
@@ -181,7 +191,8 @@ class _AgencyAgentsScreenState extends State<AgencyAgentsScreen>
               DropdownButtonFormField<String>(
                 value: staffRole,
                 items: const [
-                  DropdownMenuItem(value: 'manager_staff', child: Text('Staff (Agent)')),
+                  DropdownMenuItem(
+                      value: 'manager_staff', child: Text('Staff (Agent)')),
                   DropdownMenuItem(value: 'finance', child: Text('Finance')),
                   DropdownMenuItem(value: 'manager_admin', child: Text('Admin')),
                 ],
@@ -192,8 +203,12 @@ class _AgencyAgentsScreenState extends State<AgencyAgentsScreen>
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Create')),
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Create')),
         ],
       ),
     );
@@ -232,8 +247,12 @@ class _AgencyAgentsScreenState extends State<AgencyAgentsScreen>
         title: const Text('Deactivate staff'),
         content: Text('Deactivate "$staffName"? They won’t be able to log in.'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Deactivate')),
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Deactivate')),
         ],
       ),
     );
@@ -263,7 +282,7 @@ class _AgencyAgentsScreenState extends State<AgencyAgentsScreen>
     final ok = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('Assign property'),
+        title: Text('Assign property to $staffName'),
         content: DropdownButtonFormField<int>(
           isExpanded: true,
           value: selectedPropertyId,
@@ -281,8 +300,12 @@ class _AgencyAgentsScreenState extends State<AgencyAgentsScreen>
           decoration: const InputDecoration(labelText: 'Select a property'),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Assign')),
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Assign')),
         ],
       ),
     );
@@ -295,6 +318,8 @@ class _AgencyAgentsScreenState extends State<AgencyAgentsScreen>
         staffUserId: staffUserId,
       );
       _snack('Assigned property to $staffName');
+      // Optional: reload staff if backend later returns assigned property info
+      // await _loadStaff();
     } catch (e) {
       _snack('Assign failed: $e');
     }
@@ -303,9 +328,9 @@ class _AgencyAgentsScreenState extends State<AgencyAgentsScreen>
   // -----------------------------
   // AGENTS actions (external)
   // -----------------------------
-  Future<void> _openLinkAgentDialog() async {
+  Future<void> _openLinkAgentDialog({int? defaultAgentId}) async {
     final phoneCtrl = TextEditingController();
-    final idCtrl = TextEditingController();
+    final idCtrl = TextEditingController(text: defaultAgentId?.toString() ?? '');
 
     final ok = await showDialog<bool>(
       context: context,
@@ -317,7 +342,8 @@ class _AgencyAgentsScreenState extends State<AgencyAgentsScreen>
             TextField(
               controller: phoneCtrl,
               keyboardType: TextInputType.phone,
-              decoration: const InputDecoration(labelText: 'Agent phone (07.. / +254..)'),
+              decoration:
+                  const InputDecoration(labelText: 'Agent phone (07.. / +254..)'),
             ),
             const SizedBox(height: 10),
             TextField(
@@ -326,12 +352,17 @@ class _AgencyAgentsScreenState extends State<AgencyAgentsScreen>
               decoration: const InputDecoration(labelText: 'OR Agent Manager ID'),
             ),
             const SizedBox(height: 8),
-            Text('Tip: phone is easiest.', style: Theme.of(context).textTheme.bodySmall),
+            Text('Tip: phone is easiest.',
+                style: Theme.of(context).textTheme.bodySmall),
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Link')),
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Link')),
         ],
       ),
     );
@@ -353,7 +384,7 @@ class _AgencyAgentsScreenState extends State<AgencyAgentsScreen>
         agentManagerId: agentId,
       );
       _snack('Agent linked');
-      await _loadAgents();
+      await _loadAgents(); // ✅ refresh so status/icons update
     } catch (e) {
       _snack('Link failed: $e');
     }
@@ -366,8 +397,12 @@ class _AgencyAgentsScreenState extends State<AgencyAgentsScreen>
         title: const Text('Unlink agent'),
         content: const Text('Unlink this agent from your agency?'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Unlink')),
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Unlink')),
         ],
       ),
     );
@@ -376,7 +411,7 @@ class _AgencyAgentsScreenState extends State<AgencyAgentsScreen>
     try {
       await AgencyService.unlinkAgent(agentManagerId);
       _snack('Agent unlinked');
-      await _loadAgents();
+      await _loadAgents(); // ✅ refresh so icon/status changes
     } catch (e) {
       _snack('Unlink failed: $e');
     }
@@ -415,8 +450,12 @@ class _AgencyAgentsScreenState extends State<AgencyAgentsScreen>
           decoration: const InputDecoration(labelText: 'Select a property'),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Assign')),
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Assign')),
         ],
       ),
     );
@@ -440,12 +479,16 @@ class _AgencyAgentsScreenState extends State<AgencyAgentsScreen>
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context);
+    final viewing = _tabs.index == 0 ? 'Staff' : 'Agents';
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Agency • Staff & Agents'),
         bottom: TabBar(
           controller: _tabs,
+          labelColor: Colors.white,
+          unselectedLabelColor: Colors.white70,
+          indicatorColor: Colors.white,
           tabs: const [
             Tab(text: 'Staff', icon: Icon(LucideIcons.users)),
             Tab(text: 'Agents', icon: Icon(LucideIcons.userCheck)),
@@ -478,201 +521,303 @@ class _AgencyAgentsScreenState extends State<AgencyAgentsScreen>
           );
         },
       ),
-      body: TabBarView(
-        controller: _tabs,
+      body: Column(
         children: [
-          // STAFF TAB
-          RefreshIndicator(
-            onRefresh: _loadStaff,
-            child: ListView(
-              physics: const AlwaysScrollableScrollPhysics(),
-              padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
+            child: Row(
               children: [
-                _hero(t,
-                    icon: LucideIcons.users,
-                    title: 'Staff',
-                    subtitle: 'Create staff accounts, assign properties, deactivate access.'),
-                const SizedBox(height: 12),
-
-                if (_loadingStaff)
-                  const Padding(
-                    padding: EdgeInsets.all(28),
-                    child: Center(child: CircularProgressIndicator()),
-                  )
-                else if (_staffError != null)
-                  _errorCard(t, _staffError!)
-                else if (_staff.isEmpty)
-                  _empty(t, icon: LucideIcons.userX, text: 'No staff yet.\nTap “Add staff”.')
-                else
-                  ..._staff.map((raw) {
-                    final m = (raw is Map) ? Map<String, dynamic>.from(raw) : <String, dynamic>{};
-                    final id = (m['id'] as num?)?.toInt() ?? 0;
-                    final name = (m['name'] ?? '—').toString();
-                    final phone = (m['phone'] ?? '—').toString();
-                    final role = (m['staff_role'] ?? 'manager_staff').toString();
-                    final active = (m['active'] == true);
-
-                    return Card(
-                      margin: const EdgeInsets.only(bottom: 12),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                      child: ListTile(
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                        leading: Container(
-                          width: 46,
-                          height: 46,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: t.colorScheme.primary.withOpacity(.12),
-                          ),
-                          child: Icon(LucideIcons.user, color: t.colorScheme.primary),
-                        ),
-                        title: Text(
-                          name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: t.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w900),
-                        ),
-                        subtitle: Text('$phone • $role • ${active ? "active" : "inactive"}'),
-                        trailing: PopupMenuButton<String>(
-                          onSelected: (key) {
-                            if (key == 'assign') _assignPropertyToStaff(id, name);
-                            if (key == 'deactivate') _deactivateStaff(id, name);
-                          },
-                          itemBuilder: (_) => [
-                            const PopupMenuItem(value: 'assign', child: Text('Assign property')),
-                            if (active) const PopupMenuItem(value: 'deactivate', child: Text('Deactivate')),
-                          ],
-                        ),
-                      ),
-                    );
-                  }),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: t.colorScheme.primary.withOpacity(.12),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    'Viewing: $viewing',
+                    style: t.textTheme.labelMedium?.copyWith(fontWeight: FontWeight.w900),
+                  ),
+                ),
               ],
             ),
           ),
-
-          // AGENTS TAB
-          RefreshIndicator(
-            onRefresh: _loadAgents,
-            child: ListView(
-              physics: const AlwaysScrollableScrollPhysics(),
-              padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
+          Expanded(
+            child: TabBarView(
+              controller: _tabs,
               children: [
-                _hero(t,
-                    icon: LucideIcons.userCheck,
-                    title: 'External Agents',
-                    subtitle: 'Link existing managers as agents. Assign properties and unlink when needed.'),
-                const SizedBox(height: 12),
+                // STAFF TAB
+                RefreshIndicator(
+                  onRefresh: _loadStaff,
+                  child: ListView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
+                    children: [
+                      _hero(
+                        t,
+                        icon: LucideIcons.users,
+                        title: 'Staff',
+                        subtitle:
+                            'Create staff accounts, assign properties, deactivate access.',
+                      ),
+                      const SizedBox(height: 12),
 
-                if (_loadingAgents)
-                  const Padding(
-                    padding: EdgeInsets.all(28),
-                    child: Center(child: CircularProgressIndicator()),
-                  )
-                else if (_agentsError != null)
-                  _errorCard(t, _agentsError!)
-                else if (_agents.isEmpty)
-                  _empty(t, icon: LucideIcons.link2Off, text: 'No linked agents yet.\nTap “Link agent”.')
-                else
-                  ..._agents.map((raw) {
-                    final m = (raw is Map) ? Map<String, dynamic>.from(raw) : <String, dynamic>{};
-                    final agentId = (m['agent_manager_id'] as num?)?.toInt() ?? 0;
-                    final status = (m['status'] ?? 'active').toString();
+                      if (_loadingStaff)
+                        const Padding(
+                          padding: EdgeInsets.all(28),
+                          child: Center(child: CircularProgressIndicator()),
+                        )
+                      else if (_staffError != null)
+                        _errorCard(t, _staffError!)
+                      else if (_staff.isEmpty)
+                        _empty(t,
+                            icon: LucideIcons.userX,
+                            text: 'No staff yet.\nTap “Add staff”.')
+                      else
+                        ..._staff.map((raw) {
+                          final m = (raw is Map)
+                              ? Map<String, dynamic>.from(raw)
+                              : <String, dynamic>{};
+                          final id = (m['id'] as num?)?.toInt() ?? 0;
+                          final name = (m['name'] ?? '—').toString();
+                          final phone = (m['phone'] ?? '—').toString();
+                          final role = (m['staff_role'] ?? 'manager_staff').toString();
+                          final active = (m['active'] == true);
 
-                    final org = _agentOrgCache[agentId];
-                    final orgType = (org?['type'] ?? '').toString();
-                    final displayName = _prettyOrgName(org);
-                    final phone = (org?['phone'] ?? org?['office_phone'] ?? '—').toString();
-                    final email = (org?['email'] ?? org?['office_email'] ?? '').toString();
-
-                    final isLoadingOrg = _agentOrgLoading.contains(agentId);
-
-                    return Card(
-                      margin: const EdgeInsets.only(bottom: 12),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Container(
-                              width: 46,
-                              height: 46,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: t.colorScheme.primary.withOpacity(.12),
-                              ),
-                              child: Icon(LucideIcons.userCheck, color: t.colorScheme.primary),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
+                          return Card(
+                            margin: const EdgeInsets.only(bottom: 12),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16)),
+                            child: Padding(
+                              padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Row(
                                     children: [
+                                      Container(
+                                        width: 46,
+                                        height: 46,
+                                        decoration: BoxDecoration(
+                                          shape: BoxShape.circle,
+                                          color: t.colorScheme.primary.withOpacity(.12),
+                                        ),
+                                        child: Icon(LucideIcons.user,
+                                            color: t.colorScheme.primary),
+                                      ),
+                                      const SizedBox(width: 12),
                                       Expanded(
-                                        child: Text(
-                                          displayName.isEmpty ? 'Agent Manager #$agentId' : displayName,
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: t.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w900),
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              name,
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: t.textTheme.titleSmall?.copyWith(
+                                                  fontWeight: FontWeight.w900),
+                                            ),
+                                            const SizedBox(height: 4),
+                                            Text(
+                                              '$phone • $role • ${active ? "ACTIVE" : "INACTIVE"}',
+                                              style: t.textTheme.bodySmall
+                                                  ?.copyWith(color: t.hintColor),
+                                            ),
+                                          ],
                                         ),
                                       ),
-                                      if (isLoadingOrg)
-                                        Padding(
-                                          padding: const EdgeInsets.only(left: 8),
-                                          child: SizedBox(
-                                            width: 14,
-                                            height: 14,
-                                            child: CircularProgressIndicator(strokeWidth: 2, color: t.hintColor),
-                                          ),
-                                        ),
                                     ],
                                   ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    [
-                                      if (orgType.isNotEmpty) orgType,
-                                      'status: $status',
-                                    ].join(' • '),
-                                    style: t.textTheme.bodySmall?.copyWith(color: t.hintColor),
-                                  ),
-                                  const SizedBox(height: 8),
-                                  Wrap(
-                                    spacing: 10,
-                                    runSpacing: 6,
-                                    children: [
-                                      _chip(t, LucideIcons.phone, phone),
-                                      if (email.isNotEmpty) _chip(t, LucideIcons.mail, email),
-                                      _chip(t, LucideIcons.hash, 'id: $agentId'),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 10),
+                                  const SizedBox(height: 12),
+
                                   Row(
                                     children: [
                                       Expanded(
                                         child: OutlinedButton.icon(
-                                          onPressed: agentId <= 0 ? null : () => _assignPropertyToExternalAgent(agentId),
+                                          onPressed: id <= 0
+                                              ? null
+                                              : () => _assignPropertyToStaff(id, name),
                                           icon: const Icon(LucideIcons.building2, size: 16),
-                                          label: const Text('Assign property'),
+                                          label: const Text('Assign'),
                                         ),
                                       ),
                                       const SizedBox(width: 10),
-                                      IconButton(
-                                        tooltip: 'Unlink agent',
-                                        onPressed: agentId <= 0 ? null : () => _unlinkAgent(agentId),
-                                        icon: const Icon(LucideIcons.unlink),
+                                      Expanded(
+                                        child: FilledButton.tonalIcon(
+                                          onPressed: (!active || id <= 0)
+                                              ? null
+                                              : () => _deactivateStaff(id, name),
+                                          icon: const Icon(LucideIcons.userMinus, size: 16),
+                                          label: const Text('Deactivate'),
+                                        ),
                                       ),
                                     ],
                                   ),
                                 ],
                               ),
                             ),
-                          ],
-                        ),
+                          );
+                        }),
+                    ],
+                  ),
+                ),
+
+                // AGENTS TAB
+                RefreshIndicator(
+                  onRefresh: _loadAgents,
+                  child: ListView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
+                    children: [
+                      _hero(
+                        t,
+                        icon: LucideIcons.userCheck,
+                        title: 'External Agents',
+                        subtitle:
+                            'Link existing managers as agents. Assign properties and unlink when needed.',
                       ),
-                    );
-                  }),
+                      const SizedBox(height: 12),
+
+                      if (_loadingAgents)
+                        const Padding(
+                          padding: EdgeInsets.all(28),
+                          child: Center(child: CircularProgressIndicator()),
+                        )
+                      else if (_agentsError != null)
+                        _errorCard(t, _agentsError!)
+                      else if (_agents.isEmpty)
+                        _empty(
+                          t,
+                          icon: LucideIcons.link2Off,
+                          text: 'No linked agents yet.\nTap “Link agent”.',
+                        )
+                      else
+                        ..._agents.map((raw) {
+                          final m = (raw is Map)
+                              ? Map<String, dynamic>.from(raw)
+                              : <String, dynamic>{};
+                          final agentId = (m['agent_manager_id'] as num?)?.toInt() ?? 0;
+                          final statusRaw = (m['status'] ?? 'active').toString().toLowerCase();
+                          final isLinked = statusRaw == 'active';
+
+                          final org = _agentOrgCache[agentId];
+                          final orgType = (org?['type'] ?? '').toString();
+                          final displayName = _prettyOrgName(org);
+                          final phone = (org?['phone'] ?? org?['office_phone'] ?? '—').toString();
+                          final email = (org?['email'] ?? org?['office_email'] ?? '').toString();
+
+                          final isLoadingOrg = _agentOrgLoading.contains(agentId);
+
+                          return Card(
+                            margin: const EdgeInsets.only(bottom: 12),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16)),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Container(
+                                    width: 46,
+                                    height: 46,
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      color: t.colorScheme.primary.withOpacity(.12),
+                                    ),
+                                    child: Icon(LucideIcons.userCheck,
+                                        color: t.colorScheme.primary),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Row(
+                                          children: [
+                                            Expanded(
+                                              child: Text(
+                                                displayName.isEmpty
+                                                    ? 'Agent Manager #$agentId'
+                                                    : displayName,
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                                style: t.textTheme.titleSmall?.copyWith(
+                                                    fontWeight: FontWeight.w900),
+                                              ),
+                                            ),
+                                            if (isLoadingOrg)
+                                              Padding(
+                                                padding: const EdgeInsets.only(left: 8),
+                                                child: SizedBox(
+                                                  width: 14,
+                                                  height: 14,
+                                                  child: CircularProgressIndicator(
+                                                    strokeWidth: 2,
+                                                    color: t.hintColor,
+                                                  ),
+                                                ),
+                                              ),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          [
+                                            if (orgType.isNotEmpty) orgType,
+                                            'status: ${isLinked ? "ACTIVE" : "INACTIVE"}',
+                                          ].join(' • '),
+                                          style: t.textTheme.bodySmall?.copyWith(color: t.hintColor),
+                                        ),
+                                        const SizedBox(height: 8),
+                                        Wrap(
+                                          spacing: 10,
+                                          runSpacing: 6,
+                                          children: [
+                                            _chip(t, LucideIcons.phone, phone),
+                                            if (email.isNotEmpty) _chip(t, LucideIcons.mail, email),
+                                            _chip(t, LucideIcons.hash, 'id: $agentId'),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 10),
+
+                                        Row(
+                                          children: [
+                                            Expanded(
+                                              child: OutlinedButton.icon(
+                                                onPressed: (!isLinked || agentId <= 0)
+                                                    ? null
+                                                    : () => _assignPropertyToExternalAgent(agentId),
+                                                icon: const Icon(LucideIcons.building2, size: 16),
+                                                label: const Text('Assign property'),
+                                              ),
+                                            ),
+                                            const SizedBox(width: 10),
+                                            Expanded(
+                                              child: isLinked
+                                                  ? FilledButton.tonalIcon(
+                                                      onPressed: agentId <= 0
+                                                          ? null
+                                                          : () => _unlinkAgent(agentId),
+                                                      icon: const Icon(LucideIcons.unlink, size: 16),
+                                                      label: const Text('Unlink'),
+                                                    )
+                                                  : FilledButton.icon(
+                                                      onPressed: () => _openLinkAgentDialog(defaultAgentId: agentId),
+                                                      icon: const Icon(LucideIcons.link2, size: 16),
+                                                      label: const Text('Link'),
+                                                    ),
+                                            ),
+                                          ],
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        }),
+                    ],
+                  ),
+                ),
               ],
             ),
           ),
@@ -710,7 +855,8 @@ class _AgencyAgentsScreenState extends State<AgencyAgentsScreen>
     );
   }
 
-  Widget _hero(ThemeData t, {required IconData icon, required String title, required String subtitle}) {
+  Widget _hero(ThemeData t,
+      {required IconData icon, required String title, required String subtitle}) {
     return Container(
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(18),
@@ -735,7 +881,9 @@ class _AgencyAgentsScreenState extends State<AgencyAgentsScreen>
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(title, style: t.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w900)),
+                  Text(title,
+                      style: t.textTheme.titleMedium
+                          ?.copyWith(fontWeight: FontWeight.w900)),
                   const SizedBox(height: 6),
                   Text(
                     subtitle,
@@ -760,7 +908,9 @@ class _AgencyAgentsScreenState extends State<AgencyAgentsScreen>
         children: [
           Icon(icon, size: 56, color: Colors.grey),
           const SizedBox(height: 10),
-          Text(text, textAlign: TextAlign.center, style: t.textTheme.bodyMedium?.copyWith(color: t.hintColor)),
+          Text(text,
+              textAlign: TextAlign.center,
+              style: t.textTheme.bodyMedium?.copyWith(color: t.hintColor)),
         ],
       ),
     );
