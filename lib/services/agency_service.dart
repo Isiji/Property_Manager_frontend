@@ -112,18 +112,12 @@ class AgencyService {
   // -----------------------------
   // Staff
   // -----------------------------
-
-  /// GET /agency/staff
-  /// Returns: List<ManagerUserOut>
   static Future<List<dynamic>> listStaff() async {
     final res = await _get(_u('/agency/staff'));
     if (res.statusCode == 200) return _decodeListOrEmpty(res.body);
     throw Exception('Failed to load staff: ${_errMsg(res)}');
   }
 
-  /// POST /agency/staff
-  /// body: { name, phone, password, email?, id_number?, staff_role? }
-  /// Returns: ManagerUserOut
   static Future<Map<String, dynamic>> createStaff({
     required String name,
     required String phone,
@@ -146,16 +140,12 @@ class AgencyService {
     return _decodeMapOrEmpty(res.body);
   }
 
-  /// PATCH /agency/staff/{staff_id}/deactivate
-  /// Returns: { id, active }
   static Future<Map<String, dynamic>> deactivateStaff(int staffId) async {
     final res = await _patch(_u('/agency/staff/$staffId/deactivate'));
     if (res.statusCode == 200) return _decodeMapOrEmpty(res.body);
     throw Exception('Failed to deactivate staff: ${_errMsg(res)}');
   }
 
-  /// POST /agency/properties/{property_id}/assign/{assignee_user_id}
-  /// Returns: AssignPropertyOut
   static Future<Map<String, dynamic>> assignPropertyToStaff({
     required int propertyId,
     required int staffUserId,
@@ -165,21 +155,24 @@ class AgencyService {
     return _decodeMapOrEmpty(res.body);
   }
 
+  /// PATCH /agency/properties/{property_id}/unassign-staff
+  static Future<Map<String, dynamic>> unassignStaffFromProperty({
+    required int propertyId,
+  }) async {
+    final res = await _patch(_u('/agency/properties/$propertyId/unassign-staff'));
+    if (res.statusCode == 200) return _decodeMapOrEmpty(res.body);
+    throw Exception('Unassign staff failed: ${_errMsg(res)}');
+  }
+
   // -----------------------------
   // External Agents (linked managers)
   // -----------------------------
-
-  /// GET /agency/agents
-  /// Returns: List<LinkAgentOut>
   static Future<List<dynamic>> listLinkedAgents() async {
     final res = await _get(_u('/agency/agents'));
     if (res.statusCode == 200) return _decodeListOrEmpty(res.body);
     throw Exception('Failed to load agents: ${_errMsg(res)}');
   }
 
-  /// POST /agency/agents/link
-  /// body: { agent_manager_id? , agent_phone? }
-  /// Returns: LinkAgentOut
   static Future<Map<String, dynamic>> linkAgent({
     int? agentManagerId,
     String? agentPhone,
@@ -189,29 +182,19 @@ class AgencyService {
       'agent_phone': (agentPhone == null || agentPhone.trim().isEmpty) ? null : agentPhone.trim(),
     }..removeWhere((_, v) => v == null);
 
-    if (payload.isEmpty) {
-      throw Exception('Provide agent phone or agent id');
-    }
+    if (payload.isEmpty) throw Exception('Provide agent phone or agent id');
 
     final res = await _post(_u('/agency/agents/link'), jsonBody: payload);
     _throwIfNotOk(res, 'Link agent failed');
     return _decodeMapOrEmpty(res.body);
   }
 
-  /// PATCH /agency/agents/{agent_manager_id}/unlink
-  /// Returns: LinkAgentOut
   static Future<Map<String, dynamic>> unlinkAgent(int agentManagerId) async {
     final res = await _patch(_u('/agency/agents/$agentManagerId/unlink'));
     if (res.statusCode == 200) return _decodeMapOrEmpty(res.body);
     throw Exception('Unlink failed: ${_errMsg(res)}');
   }
 
-  /// POST /agency/properties/{property_id}/assign-external/{agent_manager_id}
-  /// Returns: AssignPropertyOut (depends on your backend implementation)
-  ///
-  /// IMPORTANT:
-  /// - This endpoint MUST exist in your backend /docs, otherwise you will get 404.
-  /// - If /docs does not show it, add it to agency_router.py and redeploy/restart.
   static Future<Map<String, dynamic>> assignPropertyToExternalAgent({
     required int propertyId,
     required int agentManagerId,
@@ -221,32 +204,26 @@ class AgencyService {
     return _decodeMapOrEmpty(res.body);
   }
 
+  /// PATCH /agency/properties/{property_id}/unassign-external
+  static Future<Map<String, dynamic>> unassignExternalFromProperty({
+    required int propertyId,
+  }) async {
+    final res = await _patch(_u('/agency/properties/$propertyId/unassign-external'));
+    if (res.statusCode == 200) return _decodeMapOrEmpty(res.body);
+    throw Exception('Unassign external agent failed: ${_errMsg(res)}');
+  }
+
   // -----------------------------
   // Assignments (for UI display)
   // -----------------------------
-
-  /// GET /agency/properties/assignments/staff
-  /// Returns list of active staff assignments
-  ///
-  /// Suggested backend payload shape:
-  /// [
-  ///   { "property_id": 4, "assignee_user_id": 12, "assigned_by_user_id": 1, "active": true, "assigned_at": "..." }
-  /// ]
   static Future<List<dynamic>> listStaffAssignments() async {
-    final res = await _get(_u('/agency/properties/assignments/staff'));
+    final res = await _get(_u('/agency/assignments/staff'));
     if (res.statusCode == 200) return _decodeListOrEmpty(res.body);
     throw Exception('Failed to load staff assignments: ${_errMsg(res)}');
   }
 
-  /// GET /agency/properties/assignments/external
-  /// Returns list of active external agent assignments
-  ///
-  /// Suggested backend payload shape:
-  /// [
-  ///   { "property_id": 4, "agent_manager_id": 9, "assigned_by_user_id": 1, "active": true, "assigned_at": "..." }
-  /// ]
   static Future<List<dynamic>> listExternalAssignments() async {
-    final res = await _get(_u('/agency/properties/assignments/external'));
+    final res = await _get(_u('/agency/assignments/external'));
     if (res.statusCode == 200) return _decodeListOrEmpty(res.body);
     throw Exception('Failed to load external assignments: ${_errMsg(res)}');
   }

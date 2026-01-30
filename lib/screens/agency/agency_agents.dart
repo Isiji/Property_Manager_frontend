@@ -42,7 +42,7 @@ class _AgencyAgentsScreenState extends State<AgencyAgentsScreen>
     super.initState();
     _tabs = TabController(length: 2, vsync: this);
     _tabs.addListener(() {
-      if (mounted) setState(() {}); // refresh heading
+      if (mounted) setState(() {});
     });
     _loadAll();
   }
@@ -64,8 +64,6 @@ class _AgencyAgentsScreenState extends State<AgencyAgentsScreen>
       _loadAgents(),
       _loadProperties(),
     ]);
-
-    // load assignments after we have staff/agents/properties
     await _loadAssignments();
   }
 
@@ -102,7 +100,6 @@ class _AgencyAgentsScreenState extends State<AgencyAgentsScreen>
           ..addAll(extMap);
       });
     } catch (e) {
-      // not fatal, UI still works
       print('⚠️ failed to load assignments: $e');
     } finally {
       if (mounted) setState(() => _loadingAssignments = false);
@@ -176,9 +173,7 @@ class _AgencyAgentsScreenState extends State<AgencyAgentsScreen>
     try {
       final org = await ManagerService.getManager(agentManagerId);
       if (!mounted) return;
-      setState(() {
-        _agentOrgCache[agentManagerId] = org;
-      });
+      setState(() => _agentOrgCache[agentManagerId] = org);
     } catch (e) {
       print('⚠️ failed to load agent org $agentManagerId: $e');
     } finally {
@@ -355,9 +350,40 @@ class _AgencyAgentsScreenState extends State<AgencyAgentsScreen>
         staffUserId: staffUserId,
       );
       _snack('Assigned property to $staffName');
-      await _loadAssignments(); // refresh UI
+      await _loadAssignments();
     } catch (e) {
       _snack('Assign failed: $e');
+    }
+  }
+
+  Future<void> _unassignStaff(int staffUserId, String staffName) async {
+    final propId = _staffAssignedPropertyByUserId[staffUserId];
+    if (propId == null || propId == 0) {
+      _snack('No property assigned.');
+      return;
+    }
+
+    final propLabel = _propertyLabel(propId);
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Unassign property'),
+        content: Text('Unassign "$propLabel" from "$staffName"?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Unassign')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+
+    try {
+      await AgencyService.unassignStaffFromProperty(propertyId: propId);
+      _snack('Unassigned from $staffName');
+      await _loadAssignments();
+    } catch (e) {
+      _snack('Unassign failed: $e');
     }
   }
 
@@ -435,7 +461,7 @@ class _AgencyAgentsScreenState extends State<AgencyAgentsScreen>
     try {
       await AgencyService.unlinkAgent(agentManagerId);
       _snack('Agent unlinked');
-      await _loadAgents(); // refresh status + icon
+      await _loadAgents();
       await _loadAssignments();
     } catch (e) {
       _snack('Unlink failed: $e');
@@ -492,6 +518,37 @@ class _AgencyAgentsScreenState extends State<AgencyAgentsScreen>
       await _loadAssignments();
     } catch (e) {
       _snack('Assign failed: $e');
+    }
+  }
+
+  Future<void> _unassignExternal(int agentManagerId) async {
+    final propId = _externalAssignedPropertyByAgentId[agentManagerId];
+    if (propId == null || propId == 0) {
+      _snack('No property assigned.');
+      return;
+    }
+
+    final propLabel = _propertyLabel(propId);
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Unassign property'),
+        content: Text('Unassign "$propLabel" from this agent?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Unassign')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+
+    try {
+      await AgencyService.unassignExternalFromProperty(propertyId: propId);
+      _snack('Unassigned from agent');
+      await _loadAssignments();
+    } catch (e) {
+      _snack('Unassign failed: $e');
     }
   }
 
@@ -727,15 +784,22 @@ class _AgencyAgentsScreenState extends State<AgencyAgentsScreen>
                                   child: OutlinedButton.icon(
                                     onPressed: id <= 0 ? null : () => _assignPropertyToStaff(id, name),
                                     icon: const Icon(LucideIcons.building2, size: 16),
-                                    label: const Text('Assign property'),
+                                    label: const Text('Assign'),
                                   ),
                                 ),
                                 const SizedBox(width: 10),
-                                FilledButton.icon(
-                                  onPressed: (!active || id <= 0) ? null : () => _deactivateStaff(id, name),
-                                  icon: const Icon(LucideIcons.userMinus, size: 16),
-                                  label: const Text('Deactivate'),
-                                ),
+                                if (assignedPropId != null)
+                                  FilledButton.icon(
+                                    onPressed: id <= 0 ? null : () => _unassignStaff(id, name),
+                                    icon: const Icon(LucideIcons.xCircle, size: 16),
+                                    label: const Text('Unassign'),
+                                  )
+                                else
+                                  FilledButton.icon(
+                                    onPressed: (!active || id <= 0) ? null : () => _deactivateStaff(id, name),
+                                    icon: const Icon(LucideIcons.userMinus, size: 16),
+                                    label: const Text('Deactivate'),
+                                  ),
                               ],
                             ),
                             const SizedBox(height: 10),
@@ -882,32 +946,36 @@ class _AgencyAgentsScreenState extends State<AgencyAgentsScreen>
                               children: [
                                 Expanded(
                                   child: OutlinedButton.icon(
-                                    onPressed: (!linked || agentId <= 0)
-                                        ? null
-                                        : () => _assignPropertyToExternalAgent(agentId),
+                                    onPressed: (!linked || agentId <= 0) ? null : () => _assignPropertyToExternalAgent(agentId),
                                     icon: const Icon(LucideIcons.building2, size: 16),
-                                    label: const Text('Assign property'),
+                                    label: const Text('Assign'),
                                   ),
                                 ),
                                 const SizedBox(width: 10),
-                                FilledButton.icon(
-                                  onPressed: agentId <= 0
-                                      ? null
-                                      : linked
-                                          ? () => _unlinkAgent(agentId)
-                                          : () async {
-                                              // re-link using id
-                                              try {
-                                                await AgencyService.linkAgent(agentManagerId: agentId);
-                                                _snack('Agent linked');
-                                                await _loadAgents();
-                                              } catch (e) {
-                                                _snack('Link failed: $e');
-                                              }
-                                            },
-                                  icon: Icon(linked ? LucideIcons.unlink : LucideIcons.link, size: 16),
-                                  label: Text(linked ? 'Unlink' : 'Link'),
-                                ),
+                                if (assignedPropId != null)
+                                  FilledButton.icon(
+                                    onPressed: (!linked || agentId <= 0) ? null : () => _unassignExternal(agentId),
+                                    icon: const Icon(LucideIcons.xCircle, size: 16),
+                                    label: const Text('Unassign'),
+                                  )
+                                else
+                                  FilledButton.icon(
+                                    onPressed: agentId <= 0
+                                        ? null
+                                        : linked
+                                            ? () => _unlinkAgent(agentId)
+                                            : () async {
+                                                try {
+                                                  await AgencyService.linkAgent(agentManagerId: agentId);
+                                                  _snack('Agent linked');
+                                                  await _loadAgents();
+                                                } catch (e) {
+                                                  _snack('Link failed: $e');
+                                                }
+                                              },
+                                    icon: Icon(linked ? LucideIcons.unlink : LucideIcons.link, size: 16),
+                                    label: Text(linked ? 'Unlink' : 'Link'),
+                                  ),
                               ],
                             ),
                           ],
