@@ -79,11 +79,31 @@ class _DashboardShellState extends State<DashboardShell> {
         title = 'Landlord';
         content = const LandlordHome();
         nav = [
-          DashboardNavItem(icon: LucideIcons.layoutDashboard, label: 'Overview', route: '/dashboard'),
-          DashboardNavItem(icon: LucideIcons.building2, label: 'Properties', route: '/dashboard'),
-          DashboardNavItem(icon: LucideIcons.wrench, label: 'Maintenance', route: '/landlord_maintenance_inbox'),
-          DashboardNavItem(icon: LucideIcons.wallet, label: 'Payouts', route: '/landlord_payouts'),
-          DashboardNavItem(icon: LucideIcons.settings, label: 'Settings', route: '/settings'),
+          DashboardNavItem(
+            icon: LucideIcons.layoutDashboard,
+            label: 'Overview',
+            route: '/dashboard',
+          ),
+          DashboardNavItem(
+            icon: LucideIcons.building2,
+            label: 'Properties',
+            route: '/dashboard',
+          ),
+          DashboardNavItem(
+            icon: LucideIcons.wrench,
+            label: 'Maintenance',
+            route: '/landlord_maintenance_inbox',
+          ),
+          DashboardNavItem(
+            icon: LucideIcons.wallet,
+            label: 'Payouts',
+            route: '/landlord_payouts',
+          ),
+          DashboardNavItem(
+            icon: LucideIcons.settings,
+            label: 'Settings',
+            route: '/settings',
+          ),
         ];
         break;
 
@@ -92,20 +112,56 @@ class _DashboardShellState extends State<DashboardShell> {
           title = 'Agency';
           content = const AgencyHome();
           nav = [
-            DashboardNavItem(icon: LucideIcons.layoutDashboard, label: 'Overview', route: '/dashboard'),
-            DashboardNavItem(icon: LucideIcons.building2, label: 'Properties', route: '/manager_properties'),
-            DashboardNavItem(icon: LucideIcons.users, label: 'Agents', route: '/agency_agents'),
-            DashboardNavItem(icon: LucideIcons.wrench, label: 'Maintenance', route: '/manager_maintenance_inbox'),
-            DashboardNavItem(icon: LucideIcons.settings, label: 'Settings', route: '/settings'),
+            DashboardNavItem(
+              icon: LucideIcons.layoutDashboard,
+              label: 'Overview',
+              route: '/dashboard',
+            ),
+            DashboardNavItem(
+              icon: LucideIcons.building2,
+              label: 'Properties',
+              route: '/manager_properties',
+            ),
+            DashboardNavItem(
+              icon: LucideIcons.users,
+              label: 'Agents',
+              route: '/agency_agents',
+            ),
+            DashboardNavItem(
+              icon: LucideIcons.wrench,
+              label: 'Maintenance',
+              route: '/manager_maintenance_inbox',
+            ),
+            DashboardNavItem(
+              icon: LucideIcons.settings,
+              label: 'Settings',
+              route: '/settings',
+            ),
           ];
         } else {
           title = 'Manager';
           content = const ManagerHome();
           nav = [
-            DashboardNavItem(icon: LucideIcons.layoutDashboard, label: 'Overview', route: '/dashboard'),
-            DashboardNavItem(icon: LucideIcons.building2, label: 'Properties', route: '/manager_properties'),
-            DashboardNavItem(icon: LucideIcons.wrench, label: 'Maintenance', route: '/manager_maintenance_inbox'),
-            DashboardNavItem(icon: LucideIcons.settings, label: 'Settings', route: '/settings'),
+            DashboardNavItem(
+              icon: LucideIcons.layoutDashboard,
+              label: 'Overview',
+              route: '/dashboard',
+            ),
+            DashboardNavItem(
+              icon: LucideIcons.building2,
+              label: 'Properties',
+              route: '/manager_properties',
+            ),
+            DashboardNavItem(
+              icon: LucideIcons.wrench,
+              label: 'Maintenance',
+              route: '/manager_maintenance_inbox',
+            ),
+            DashboardNavItem(
+              icon: LucideIcons.settings,
+              label: 'Settings',
+              route: '/settings',
+            ),
           ];
         }
         break;
@@ -115,12 +171,36 @@ class _DashboardShellState extends State<DashboardShell> {
         title = 'Admin';
         content = const AdminHome();
         nav = [
-          DashboardNavItem(icon: LucideIcons.layoutDashboard, label: 'Overview', route: '/dashboard'),
-          DashboardNavItem(icon: LucideIcons.building2, label: 'Properties', route: '/admin_properties'),
-          DashboardNavItem(icon: LucideIcons.wallet, label: 'Finance', route: '/admin_finance'),
-          DashboardNavItem(icon: LucideIcons.wrench, label: 'Maintenance', route: '/admin_maintenance'),
-          DashboardNavItem(icon: LucideIcons.bell, label: 'Notifications', route: '/admin_notifications'),
-          DashboardNavItem(icon: LucideIcons.settings, label: 'Settings', route: '/settings'),
+          DashboardNavItem(
+            icon: LucideIcons.layoutDashboard,
+            label: 'Overview',
+            route: '/dashboard',
+          ),
+          DashboardNavItem(
+            icon: LucideIcons.building2,
+            label: 'Properties',
+            route: '/admin_properties',
+          ),
+          DashboardNavItem(
+            icon: LucideIcons.wallet,
+            label: 'Finance',
+            route: '/admin_finance',
+          ),
+          DashboardNavItem(
+            icon: LucideIcons.wrench,
+            label: 'Maintenance',
+            route: '/admin_maintenance',
+          ),
+          DashboardNavItem(
+            icon: LucideIcons.bell,
+            label: 'Notifications',
+            route: '/admin_notifications',
+          ),
+          DashboardNavItem(
+            icon: LucideIcons.settings,
+            label: 'Settings',
+            route: '/settings',
+          ),
         ];
         break;
 
@@ -128,8 +208,16 @@ class _DashboardShellState extends State<DashboardShell> {
         title = 'Tenant';
         content = const Center(child: Text('Tenant dashboard coming soon'));
         nav = [
-          DashboardNavItem(icon: LucideIcons.layoutDashboard, label: 'Overview', route: '/dashboard'),
-          DashboardNavItem(icon: LucideIcons.settings, label: 'Settings', route: '/settings'),
+          DashboardNavItem(
+            icon: LucideIcons.layoutDashboard,
+            label: 'Overview',
+            route: '/dashboard',
+          ),
+          DashboardNavItem(
+            icon: LucideIcons.settings,
+            label: 'Settings',
+            route: '/settings',
+          ),
         ];
         break;
 
@@ -137,11 +225,16 @@ class _DashboardShellState extends State<DashboardShell> {
         title = 'Dashboard';
         content = const Center(child: CircularProgressIndicator());
         nav = [
-          DashboardNavItem(icon: LucideIcons.layoutDashboard, label: 'Overview', route: '/dashboard'),
+          DashboardNavItem(
+            icon: LucideIcons.layoutDashboard,
+            label: 'Overview',
+            route: '/dashboard',
+          ),
         ];
     }
 
-    final routeName = ModalRoute.of(context)?.settings.name ?? currentRouteFallback;
+    final routeName =
+        ModalRoute.of(context)?.settings.name ?? currentRouteFallback;
 
     return BaseDashboard(
       title: title,
