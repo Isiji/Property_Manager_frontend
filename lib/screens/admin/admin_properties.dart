@@ -25,6 +25,14 @@ class _AdminPropertiesScreenState extends State<AdminPropertiesScreen> {
     _load();
   }
 
+  void _goBack() {
+    if (Navigator.canPop(context)) {
+      Navigator.pop(context);
+    } else {
+      Navigator.pushReplacementNamed(context, '/dashboard');
+    }
+  }
+
   Future<void> _load() async {
     setState(() {
       _loading = true;
@@ -51,83 +59,81 @@ class _AdminPropertiesScreenState extends State<AdminPropertiesScreen> {
   Widget build(BuildContext context) {
     final t = Theme.of(context);
 
-    // ✅ IMPORTANT FIX: Provide a Material ancestor
-    return Material(
-      color: Colors.transparent, // keep BaseDashboard background
-      child: Builder(
-        builder: (_) {
-          if (_loading) return const Center(child: CircularProgressIndicator());
+    final filtered = _rows.where((r) {
+      if (_q.trim().isEmpty) return true;
+      final s = '${r['name'] ?? ''} ${r['property_code'] ?? ''} ${r['address'] ?? ''}'.toLowerCase();
+      return s.contains(_q.trim().toLowerCase());
+    }).toList();
 
-          if (_error != null) {
-            return Center(
-              child: Padding(
-                padding: const EdgeInsets.all(18),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(LucideIcons.alertTriangle),
-                    const SizedBox(height: 10),
-                    Text(_error!, textAlign: TextAlign.center),
-                    const SizedBox(height: 12),
-                    FilledButton(onPressed: _load, child: const Text('Retry')),
-                  ],
-                ),
-              ),
-            );
-          }
-
-          final filtered = _rows.where((r) {
-            if (_q.trim().isEmpty) return true;
-            final s =
-                '${r['name'] ?? ''} ${r['property_code'] ?? ''} ${r['address'] ?? ''}'
-                    .toLowerCase();
-            return s.contains(_q.trim().toLowerCase());
-          }).toList();
-
-          return RefreshIndicator(
-            onRefresh: _load,
-            child: ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                TextField(
-                  decoration: const InputDecoration(
-                    prefixIcon: Icon(LucideIcons.search),
-                    labelText: 'Search properties',
-                    border: OutlineInputBorder(),
-                  ),
-                  onChanged: (v) => setState(() => _q = v),
-                ),
-                const SizedBox(height: 12),
-                Text('${filtered.length} properties', style: t.textTheme.labelLarge),
-                const SizedBox(height: 8),
-                ...filtered.map((r) {
-                  final pid = (r['id'] as num?)?.toInt() ?? 0;
-                  final name = (r['name'] ?? '').toString();
-                  final code = (r['property_code'] ?? '').toString();
-                  final units = (r['units'] as num?)?.toInt() ?? 0;
-                  final occ = (r['occupied_units'] as num?)?.toInt() ?? 0;
-
-                  return Card(
-                    child: ListTile(
-                      leading: const Icon(LucideIcons.building2),
-                      title: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis),
-                      subtitle: Text('Code: $code • Units: $occ/$units'),
-                      trailing: const Icon(Icons.chevron_right),
-                      onTap: pid == 0
-                          ? null
-                          : () => Navigator.pushNamed(
-                                context,
-                                '/landlord_property_units',
-                                arguments: {'propertyId': pid},
-                              ),
-                    ),
-                  );
-                }),
-              ],
-            ),
-          );
-        },
+    return Scaffold(
+      appBar: AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: _goBack,
+          tooltip: 'Back',
+        ),
+        title: const Text('Admin • Properties'),
       ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : _error != null
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(18),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(LucideIcons.alertTriangle),
+                        const SizedBox(height: 10),
+                        Text(_error!, textAlign: TextAlign.center),
+                        const SizedBox(height: 12),
+                        FilledButton(onPressed: _load, child: const Text('Retry')),
+                      ],
+                    ),
+                  ),
+                )
+              : RefreshIndicator(
+                  onRefresh: _load,
+                  child: ListView(
+                    padding: const EdgeInsets.all(16),
+                    children: [
+                      TextField(
+                        decoration: const InputDecoration(
+                          prefixIcon: Icon(LucideIcons.search),
+                          labelText: 'Search properties',
+                          border: OutlineInputBorder(),
+                        ),
+                        onChanged: (v) => setState(() => _q = v),
+                      ),
+                      const SizedBox(height: 12),
+                      Text('${filtered.length} properties', style: t.textTheme.labelLarge),
+                      const SizedBox(height: 8),
+                      ...filtered.map((r) {
+                        final pid = (r['id'] as num?)?.toInt() ?? 0;
+                        final name = (r['name'] ?? '').toString();
+                        final code = (r['property_code'] ?? '').toString();
+                        final units = (r['units'] as num?)?.toInt() ?? 0;
+                        final occ = (r['occupied_units'] as num?)?.toInt() ?? 0;
+
+                        return Card(
+                          child: ListTile(
+                            leading: const Icon(LucideIcons.building2),
+                            title: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis),
+                            subtitle: Text('Code: $code • Units: $occ/$units'),
+                            trailing: const Icon(Icons.chevron_right),
+                            onTap: pid == 0
+                                ? null
+                                : () => Navigator.pushNamed(
+                                      context,
+                                      '/landlord_property_units',
+                                      arguments: {'propertyId': pid},
+                                    ),
+                          ),
+                        );
+                      }),
+                    ],
+                  ),
+                ),
     );
   }
 }

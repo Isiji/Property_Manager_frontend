@@ -1,3 +1,4 @@
+// lib/screens/dashboard/base_dashboard.dart
 // ignore_for_file: avoid_print
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -94,11 +95,13 @@ class _BaseDashboardState extends State<BaseDashboard> {
     );
   }
 
+  /// ✅ IMPORTANT CHANGE:
+  /// Use pushNamed (not replacement) so every page can go back.
   void _go(DashboardNavItem item) {
     final current = ModalRoute.of(context)?.settings.name;
     if (current == item.route) return;
 
-    Navigator.pushReplacementNamed(
+    Navigator.pushNamed(
       context,
       item.route,
       arguments: item.arguments,
@@ -221,10 +224,19 @@ class _BaseDashboardState extends State<BaseDashboard> {
             ),
             actions: actions,
           ),
-          drawer: Drawer(child: SafeArea(child: _SideNav(collapsed: false, currentRoute: widget.currentRoute, items: widget.navItems, onTap: (i) {
-            Navigator.pop(context);
-            _go(i);
-          }))),
+          drawer: Drawer(
+            child: SafeArea(
+              child: _SideNav(
+                collapsed: false,
+                currentRoute: widget.currentRoute,
+                items: widget.navItems,
+                onTap: (i) {
+                  Navigator.pop(context);
+                  _go(i);
+                },
+              ),
+            ),
+          ),
           body: Container(
             color: theme.colorScheme.surfaceContainerLowest,
             child: SafeArea(top: false, child: widget.body),
@@ -255,7 +267,14 @@ class _SideNav extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 8),
       children: [
         const SizedBox(height: 8),
-        ...items.map((e) => _SideTile(item: e, collapsed: collapsed, selected: e.route == currentRoute, onTap: () => onTap(e))),
+        ...items.map(
+          (e) => _SideTile(
+            item: e,
+            collapsed: collapsed,
+            selected: e.route == currentRoute,
+            onTap: () => onTap(e),
+          ),
+        ),
       ],
     );
   }
