@@ -1,6 +1,5 @@
 // lib/main.dart
 import 'package:flutter/material.dart';
-import 'package:property_manager_frontend/screens/landlord/landlord_payouts.dart';
 import 'package:provider/provider.dart';
 
 import 'package:property_manager_frontend/screens/auth/login_screen.dart';
@@ -11,7 +10,12 @@ import 'package:property_manager_frontend/screens/dashboard/dashboard_shell.dart
 import 'package:property_manager_frontend/screens/common/maintenance_inbox.dart';
 import 'package:property_manager_frontend/screens/landlord/landlord_property_units.dart';
 import 'package:property_manager_frontend/screens/landlord/landlord_overview.dart';
+import 'package:property_manager_frontend/screens/landlord/landlord_payouts.dart';
+
 import 'package:property_manager_frontend/screens/manager/manager_payments.dart';
+import 'package:property_manager_frontend/screens/manager/manager_properties.dart';
+import 'package:property_manager_frontend/screens/manager/manager_tenants.dart';
+
 import 'package:property_manager_frontend/screens/agency/agency_agents.dart';
 
 import 'package:property_manager_frontend/theme/app_theme.dart';
@@ -19,13 +23,14 @@ import 'package:property_manager_frontend/providers/theme_provider.dart';
 import 'package:property_manager_frontend/utils/token_manager.dart';
 import 'package:property_manager_frontend/screens/lease/lease_view.dart';
 
-import 'package:property_manager_frontend/screens/manager/manager_properties.dart';
-import 'package:property_manager_frontend/screens/manager/manager_tenants.dart';
-
-// ✅ NEW imports
+// ✅ manager router (agency vs individual)
 import 'package:property_manager_frontend/screens/manager/manager_dashboard_router.dart';
-import 'package:property_manager_frontend/screens/manager/agency_dashboard.dart';
-import 'package:property_manager_frontend/screens/agency/agency_agents.dart';
+
+// ✅ Admin screens
+import 'package:property_manager_frontend/screens/admin/admin_properties.dart';
+import 'package:property_manager_frontend/screens/admin/admin_finance.dart';
+import 'package:property_manager_frontend/screens/admin/admin_maintenance.dart';
+import 'package:property_manager_frontend/screens/admin/admin_notifications.dart';
 
 void main() {
   runApp(
@@ -84,15 +89,11 @@ class PropSmartApp extends StatelessWidget {
         // ✅ Route aliases (old routes still work)
         '/landlord_dashboard': (_) => const DashboardShell(),
 
-        // ✅ CHANGED: manager_dashboard must NOT go to DashboardShell
-        // It must route agency vs individual
+        // ✅ managers must route agency vs individual
         '/manager_dashboard': (_) => const ManagerDashboardRouter(),
 
         '/admin_dashboard': (_) => const DashboardShell(),
         '/tenant_dashboard': (_) => const DashboardShell(),
-
-        // ✅ NEW: agency landing
-        '/agency_dashboard': (_) => const DashboardShell(),
 
         '/landlord_payouts': (_) => const LandlordPayoutsScreen(),
         '/landlord_overview': (_) => const LandlordOverview(),
@@ -118,6 +119,7 @@ class PropSmartApp extends StatelessWidget {
             initialPeriod: period,
           );
         },
+
         '/agency_agents': (_) => const AgencyAgentsScreen(),
 
         '/manager_tenants': (context) {
@@ -137,7 +139,7 @@ class PropSmartApp extends StatelessWidget {
           );
         },
 
-        // ✅ Landlord property units page (also used by manager for now)
+        // ✅ Landlord property units page (also used by admin drilldown)
         '/landlord_property_units': (context) {
           final args = ModalRoute.of(context)!.settings.arguments;
           int propertyId;
@@ -152,6 +154,12 @@ class PropSmartApp extends StatelessWidget {
           }
           return LandlordPropertyUnits(propertyId: propertyId);
         },
+
+        // ✅ Admin routes
+        '/admin_properties': (_) => const AdminPropertiesScreen(),
+        '/admin_finance': (_) => const AdminFinanceScreen(),
+        '/admin_maintenance': (_) => const AdminMaintenanceScreen(),
+        '/admin_notifications': (_) => const AdminNotificationsScreen(),
       },
       home: const LaunchDecider(),
     );

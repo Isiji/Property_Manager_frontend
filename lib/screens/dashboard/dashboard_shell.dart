@@ -1,3 +1,4 @@
+// lib/screens/dashboard/dashboard_shell.dart
 // ignore_for_file: avoid_print
 
 import 'package:flutter/material.dart';
@@ -9,6 +10,12 @@ import 'package:property_manager_frontend/screens/dashboard/base_dashboard.dart'
 import 'package:property_manager_frontend/screens/landlord/landlord_home.dart';
 import 'package:property_manager_frontend/screens/manager/manager_home.dart';
 import 'package:property_manager_frontend/screens/agency/agency_home.dart';
+
+import 'package:property_manager_frontend/screens/admin/admin_home.dart';
+import 'package:property_manager_frontend/screens/admin/admin_properties.dart';
+import 'package:property_manager_frontend/screens/admin/admin_finance.dart';
+import 'package:property_manager_frontend/screens/admin/admin_maintenance.dart';
+import 'package:property_manager_frontend/screens/admin/admin_notifications.dart';
 
 import 'package:property_manager_frontend/services/manager_service.dart';
 
@@ -65,7 +72,7 @@ class _DashboardShellState extends State<DashboardShell> {
     Widget content;
     String title;
     List<DashboardNavItem> nav;
-    const String currentRoute = '/dashboard';
+    const String currentRouteFallback = '/dashboard';
 
     switch (_role) {
       case 'landlord':
@@ -104,10 +111,15 @@ class _DashboardShellState extends State<DashboardShell> {
         break;
 
       case 'admin':
+        // Admin overview lives at /dashboard, other pages are routes.
         title = 'Admin';
-        content = const Center(child: Text('Admin dashboard coming soon'));
+        content = const AdminHome();
         nav = [
           DashboardNavItem(icon: LucideIcons.layoutDashboard, label: 'Overview', route: '/dashboard'),
+          DashboardNavItem(icon: LucideIcons.building2, label: 'Properties', route: '/admin_properties'),
+          DashboardNavItem(icon: LucideIcons.wallet, label: 'Finance', route: '/admin_finance'),
+          DashboardNavItem(icon: LucideIcons.wrench, label: 'Maintenance', route: '/admin_maintenance'),
+          DashboardNavItem(icon: LucideIcons.bell, label: 'Notifications', route: '/admin_notifications'),
           DashboardNavItem(icon: LucideIcons.settings, label: 'Settings', route: '/settings'),
         ];
         break;
@@ -129,7 +141,7 @@ class _DashboardShellState extends State<DashboardShell> {
         ];
     }
 
-    final routeName = ModalRoute.of(context)?.settings.name ?? currentRoute;
+    final routeName = ModalRoute.of(context)?.settings.name ?? currentRouteFallback;
 
     return BaseDashboard(
       title: title,
