@@ -19,7 +19,7 @@ class ManagerPropertiesScreen extends StatefulWidget {
 class _ManagerPropertiesScreenState extends State<ManagerPropertiesScreen> {
   bool _loading = true;
 
-  int? _staffId;   // manager_user_id (staff)
+  int? _staffId; // manager_user_id (staff)
   int? _managerId; // manager_id (org)
 
   String _orgName = '—';
@@ -47,8 +47,14 @@ class _ManagerPropertiesScreenState extends State<ManagerPropertiesScreen> {
         title: const Text('Log out'),
         content: const Text('Are you sure you want to log out?'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Log out')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Log out'),
+          ),
         ],
       ),
     );
@@ -99,8 +105,12 @@ class _ManagerPropertiesScreenState extends State<ManagerPropertiesScreen> {
       final staffPhone = (me['staff_phone'] ?? '').toString().trim();
       final mType = (me['manager_type'] ?? 'individual').toString().trim();
 
-      final staffId = (me['manager_user_id'] is num) ? (me['manager_user_id'] as num).toInt() : _staffId;
-      final managerId = (me['manager_id'] is num) ? (me['manager_id'] as num).toInt() : null;
+      final staffId = (me['manager_user_id'] is num)
+          ? (me['manager_user_id'] as num).toInt()
+          : _staffId;
+      final managerId = (me['manager_id'] is num)
+          ? (me['manager_id'] as num).toInt()
+          : null;
 
       if (!mounted) return;
       setState(() {
@@ -141,7 +151,7 @@ class _ManagerPropertiesScreenState extends State<ManagerPropertiesScreen> {
     }
   }
 
-  Future<void> _load_attachDefaultsForPeriods(List<dynamic> data) async {
+  Future<void> _attachDefaultPeriods(List<dynamic> data) async {
     final now = DateTime.now();
     final current = '${now.year}-${now.month.toString().padLeft(2, '0')}';
     for (final raw in data) {
@@ -153,17 +163,18 @@ class _ManagerPropertiesScreenState extends State<ManagerPropertiesScreen> {
 
   Future<void> _loadProperties() async {
     if (_managerId == null) {
+      if (!mounted) return;
+      setState(() => _properties = []);
       return;
     }
 
     try {
-      // ✅ use the existing backend endpoint that you definitely have:
+      // ✅ backend: GET /properties/me  (manager staff visibility)
       final data = await PropertyService.getMyVisibleProperties();
-
 
       if (!mounted) return;
       setState(() => _properties = data);
-      await _load_attachDefaultsForPeriods(data);
+      await _attachDefaultPeriods(data);
     } catch (e) {
       print('💥 manager properties load failed: $e');
 
@@ -199,7 +210,9 @@ class _ManagerPropertiesScreenState extends State<ManagerPropertiesScreen> {
   Future<void> _copy(String label, String text) async {
     await Clipboard.setData(ClipboardData(text: text));
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$label copied')));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('$label copied')),
+    );
   }
 
   List<String> _lastMonths({int count = 8}) {
@@ -219,6 +232,8 @@ class _ManagerPropertiesScreenState extends State<ManagerPropertiesScreen> {
   }
 
   void _ensurePaymentStatus(int propertyId, String period) {
+    if (propertyId == 0) return;
+
     final key = '$propertyId|$period';
     final cached = _paymentStatusCache[propertyId]?[period];
     if (cached != null) return;
@@ -231,7 +246,10 @@ class _ManagerPropertiesScreenState extends State<ManagerPropertiesScreen> {
 
   Future<void> _loadPaymentStatus({required int propertyId, required String period}) async {
     try {
-      final status = await PaymentService.getStatusByProperty(propertyId: propertyId, period: period);
+      final status = await PaymentService.getStatusByProperty(
+        propertyId: propertyId,
+        period: period,
+      );
       if (!mounted) return;
 
       setState(() {
@@ -317,237 +335,253 @@ class _ManagerPropertiesScreenState extends State<ManagerPropertiesScreen> {
             ' • Staff ID: ${_staffId ?? "—"}'
             '${_managerId == null ? '' : ' • Org ID: $_managerId'}';
 
-    return Scaffold(
-      appBar: AppBar(
-        leading: IconButton(
-          tooltip: 'Back',
-          icon: const Icon(LucideIcons.arrowLeft),
-          onPressed: () {
-            if (Navigator.of(context).canPop()) {
-              Navigator.of(context).pop();
-            } else {
-              Navigator.of(context).pushReplacementNamed('/dashboard');
-            }
-          },
+    // ✅ SAFETY: Even if this page is inserted into a weird widget tree
+    // (IndexedStack without Scaffold/Material), Material widgets won't crash.
+    return Material(
+      child: Scaffold(
+        appBar: AppBar(
+          leading: IconButton(
+            tooltip: 'Back',
+            icon: const Icon(LucideIcons.arrowLeft),
+            onPressed: () {
+              if (Navigator.of(context).canPop()) {
+                Navigator.of(context).pop();
+              } else {
+                Navigator.of(context).pushReplacementNamed('/dashboard');
+              }
+            },
+          ),
+          title: Text(headline),
+          actions: [
+            IconButton(
+              tooltip: 'Refresh',
+              icon: const Icon(LucideIcons.refreshCcw),
+              onPressed: _refreshAll,
+            ),
+            IconButton(
+              tooltip: 'Log out',
+              icon: const Icon(LucideIcons.logOut),
+              onPressed: _logout,
+            ),
+            const SizedBox(width: 8),
+          ],
         ),
-        title: Text(headline),
-        actions: [
-          IconButton(
-            tooltip: 'Refresh',
-            icon: const Icon(LucideIcons.refreshCcw),
-            onPressed: _refreshAll,
-          ),
-          IconButton(
-            tooltip: 'Log out',
-            icon: const Icon(LucideIcons.logOut),
-            onPressed: _logout,
-          ),
-          const SizedBox(width: 8),
-        ],
-      ),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
-        children: [
-          Card(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Row(
-                children: [
-                  Container(
-                    width: 46,
-                    height: 46,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: t.colorScheme.primary.withOpacity(.12),
+        body: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
+          children: [
+            Card(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 46,
+                      height: 46,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: t.colorScheme.primary.withOpacity(.12),
+                      ),
+                      child: Icon(
+                        _managerType == 'agency' ? LucideIcons.building2 : LucideIcons.userCog,
+                        color: t.colorScheme.primary,
+                      ),
                     ),
-                    child: Icon(
-                      _managerType == 'agency' ? LucideIcons.building2 : LucideIcons.userCog,
-                      color: t.colorScheme.primary,
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            _managerType == 'agency' ? _orgName : (_orgName == '—' ? 'Manager' : _orgName),
+                            style: t.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w900),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            subtitle,
+                            style: t.textTheme.bodySmall?.copyWith(color: t.hintColor),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
+                    const SizedBox(width: 8),
+                    _kv(t, 'Properties', '${_properties.length}'),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+
+            TextField(
+              onChanged: (v) => setState(() => _search = v),
+              decoration: InputDecoration(
+                hintText: 'Search by property name / address / code…',
+                prefixIcon: const Icon(LucideIcons.search),
+                filled: true,
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+            ),
+            const SizedBox(height: 14),
+
+            if (_loading)
+              const Padding(
+                padding: EdgeInsets.all(24),
+                child: Center(child: CircularProgressIndicator()),
+              )
+            else if (list.isEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 30),
+                child: Column(
+                  children: [
+                    const Icon(LucideIcons.folderOpen, size: 52, color: Colors.grey),
+                    const SizedBox(height: 10),
+                    Text(
+                      'No properties assigned to this manager yet.',
+                      style: t.textTheme.bodyMedium?.copyWith(color: t.hintColor),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                ),
+              )
+            else
+              ...list.map((raw) {
+                final p = (raw is Map) ? Map<String, dynamic>.from(raw) : <String, dynamic>{};
+                final pid = (p['id'] as num?)?.toInt() ?? 0;
+                final name = (p['name'] ?? '—').toString();
+                final addr = (p['address'] ?? '—').toString();
+                final code = (p['property_code'] ?? '—').toString();
+
+                final period = _selectedPeriod[pid] ?? _lastMonths().first;
+                _ensurePaymentStatus(pid, period);
+
+                return Card(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  child: Padding(
+                    padding: const EdgeInsets.all(14),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          _managerType == 'agency' ? _orgName : (_orgName == '—' ? 'Manager' : _orgName),
-                          style: t.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w900),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                        Row(
+                          children: [
+                            Container(
+                              width: 44,
+                              height: 44,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: t.colorScheme.primary.withOpacity(.12),
+                              ),
+                              child: Icon(LucideIcons.building2, color: t.colorScheme.primary),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    name,
+                                    style: t.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w900),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    addr,
+                                    style: t.textTheme.bodySmall?.copyWith(color: t.hintColor),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
                         ),
-                        const SizedBox(height: 4),
-                        Text(
-                          subtitle,
-                          style: t.textTheme.bodySmall?.copyWith(color: t.hintColor),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+
+                        const SizedBox(height: 10),
+
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            _CopyChip(
+                              icon: LucideIcons.qrCode,
+                              label: 'Code: $code',
+                              onCopy: code.trim().isEmpty || code == '—'
+                                  ? null
+                                  : () => _copy('Property code', code),
+                            ),
+                            _InfoChip(icon: LucideIcons.hash, label: 'ID: $pid'),
+                          ],
+                        ),
+
+                        const SizedBox(height: 12),
+
+                        Wrap(
+                          spacing: 10,
+                          runSpacing: 10,
+                          children: [
+                            OutlinedButton.icon(
+                              onPressed: pid == 0
+                                  ? null
+                                  : () => Navigator.pushNamed(
+                                        context,
+                                        '/landlord_property_units',
+                                        arguments: {'propertyId': pid},
+                                      ),
+                              icon: const Icon(LucideIcons.grid, size: 18),
+                              label: const Text('Units'),
+                            ),
+                            OutlinedButton.icon(
+                              onPressed: pid == 0
+                                  ? null
+                                  : () => Navigator.pushNamed(
+                                        context,
+                                        '/manager_tenants',
+                                        arguments: {'propertyId': pid, 'propertyCode': code},
+                                      ),
+                              icon: const Icon(LucideIcons.users, size: 18),
+                              label: const Text('Tenants'),
+                            ),
+                            OutlinedButton.icon(
+                              onPressed: pid == 0
+                                  ? null
+                                  : () => Navigator.pushNamed(
+                                        context,
+                                        '/manager_maintenance_inbox',
+                                        arguments: {
+                                          'propertyId': pid,
+                                          'propertyCode': code,
+                                          'propertyName': name,
+                                        },
+                                      ),
+                              icon: const Icon(LucideIcons.wrench, size: 18),
+                              label: const Text('Maintenance'),
+                            ),
+                            FilledButton.icon(
+                              onPressed: pid == 0
+                                  ? null
+                                  : () => _openPayments(
+                                        propertyId: pid,
+                                        period: period,
+                                        propertyName: name,
+                                        propertyCode: code,
+                                      ),
+                              icon: const Icon(LucideIcons.wallet, size: 18),
+                              label: const Text('Payments'),
+                            ),
+                          ],
                         ),
                       ],
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  _kv(t, 'Properties', '${_properties.length}'),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
-
-          TextField(
-            onChanged: (v) => setState(() => _search = v),
-            decoration: InputDecoration(
-              hintText: 'Search by property name / address / code…',
-              prefixIcon: const Icon(LucideIcons.search),
-              filled: true,
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-            ),
-          ),
-          const SizedBox(height: 14),
-
-          if (_loading)
-            const Padding(
-              padding: EdgeInsets.all(24),
-              child: Center(child: CircularProgressIndicator()),
-            )
-          else if (list.isEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 30),
-              child: Column(
-                children: [
-                  const Icon(LucideIcons.folderOpen, size: 52, color: Colors.grey),
-                  const SizedBox(height: 10),
-                  Text(
-                    'No properties assigned to this manager yet.',
-                    style: t.textTheme.bodyMedium?.copyWith(color: t.hintColor),
-                    textAlign: TextAlign.center,
-                  ),
-                ],
-              ),
-            )
-          else
-            ...list.map((raw) {
-              final p = (raw is Map) ? Map<String, dynamic>.from(raw) : <String, dynamic>{};
-              final pid = (p['id'] as num?)?.toInt() ?? 0;
-              final name = (p['name'] ?? '—').toString();
-              final addr = (p['address'] ?? '—').toString();
-              final code = (p['property_code'] ?? '—').toString();
-
-              final period = _selectedPeriod[pid] ?? _lastMonths().first;
-              _ensurePaymentStatus(pid, period);
-
-              return Card(
-                margin: const EdgeInsets.only(bottom: 12),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                child: Padding(
-                  padding: const EdgeInsets.all(14),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Container(
-                            width: 44,
-                            height: 44,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: t.colorScheme.primary.withOpacity(.12),
-                            ),
-                            child: Icon(LucideIcons.building2, color: t.colorScheme.primary),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  name,
-                                  style: t.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w900),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  addr,
-                                  style: t.textTheme.bodySmall?.copyWith(color: t.hintColor),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-
-                      const SizedBox(height: 10),
-
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: [
-                          _CopyChip(
-                            icon: LucideIcons.qrCode,
-                            label: 'Code: $code',
-                            onCopy: code.trim().isEmpty || code == '—' ? null : () => _copy('Property code', code),
-                          ),
-                          _InfoChip(icon: LucideIcons.hash, label: 'ID: $pid'),
-                        ],
-                      ),
-
-                      const SizedBox(height: 12),
-
-                      Wrap(
-                        spacing: 10,
-                        runSpacing: 10,
-                        children: [
-                          OutlinedButton.icon(
-                            onPressed: pid == 0
-                                ? null
-                                : () => Navigator.pushNamed(
-                                      context,
-                                      '/landlord_property_units',
-                                      arguments: {'propertyId': pid},
-                                    ),
-                            icon: const Icon(LucideIcons.grid, size: 18),
-                            label: const Text('Units'),
-                          ),
-                          OutlinedButton.icon(
-                            onPressed: pid == 0
-                                ? null
-                                : () => Navigator.pushNamed(
-                                      context,
-                                      '/manager_tenants',
-                                      arguments: {'propertyId': pid, 'propertyCode': code},
-                                    ),
-                            icon: const Icon(LucideIcons.users, size: 18),
-                            label: const Text('Tenants'),
-                          ),
-                          OutlinedButton.icon(
-                            onPressed: () => Navigator.pushNamed(context, '/manager_maintenance_inbox'),
-                            icon: const Icon(LucideIcons.wrench, size: 18),
-                            label: const Text('Maintenance'),
-                          ),
-                          FilledButton.icon(
-                            onPressed: pid == 0
-                                ? null
-                                : () => _openPayments(
-                                      propertyId: pid,
-                                      period: period,
-                                      propertyName: name,
-                                      propertyCode: code,
-                                    ),
-                            icon: const Icon(LucideIcons.wallet, size: 18),
-                            label: const Text('Payments'),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            }),
-        ],
+                );
+              }),
+          ],
+        ),
       ),
     );
   }
@@ -607,7 +641,6 @@ class _CopyChip extends StatelessWidget {
           Icon(icon, size: 16, color: t.hintColor),
           const SizedBox(width: 6),
           Text(label, style: t.textTheme.labelMedium),
-          const SizedBox(height: 0),
           const SizedBox(width: 6),
           InkWell(
             onTap: onCopy,

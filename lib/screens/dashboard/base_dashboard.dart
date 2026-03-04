@@ -34,10 +34,10 @@ class BaseDashboard extends StatefulWidget {
   /// Optional: show units count chip in the AppBar row.
   final int? unitsCount;
 
-  /// ✅ Provide navigation items (role-aware).
+  /// Provide navigation items (role-aware).
   final List<DashboardNavItem> navItems;
 
-  /// ✅ For highlighting current item (route name).
+  /// For highlighting current item (route name).
   final String currentRoute;
 
   const BaseDashboard({
@@ -95,13 +95,12 @@ class _BaseDashboardState extends State<BaseDashboard> {
     );
   }
 
-  /// ✅ IMPORTANT CHANGE:
-  /// Use pushNamed (not replacement) so every page can go back.
   void _go(DashboardNavItem item) {
     final current = ModalRoute.of(context)?.settings.name;
     if (current == item.route) return;
 
-    Navigator.pushNamed(
+    // ✅ Use pushReplacementNamed inside dashboard nav (keeps "single window" behavior)
+    Navigator.pushReplacementNamed(
       context,
       item.route,
       arguments: item.arguments,
@@ -116,6 +115,8 @@ class _BaseDashboardState extends State<BaseDashboard> {
       builder: (context, constraints) {
         final isWide = constraints.maxWidth >= 800.0;
         final sideWidth = _collapsed ? 72.0 : 248.0;
+
+        final canGoBack = Navigator.of(context).canPop();
 
         final actions = <Widget>[
           if (isWide)
@@ -186,7 +187,18 @@ class _BaseDashboardState extends State<BaseDashboard> {
 
         if (isWide) {
           return Scaffold(
-            appBar: AppBar(title: titleRow, actions: actions),
+            appBar: AppBar(
+              title: titleRow,
+              actions: actions,
+              // ✅ back button on wide too
+              leading: canGoBack
+                  ? IconButton(
+                      tooltip: 'Back',
+                      icon: const Icon(Icons.arrow_back),
+                      onPressed: () => Navigator.of(context).maybePop(),
+                    )
+                  : null,
+            ),
             body: Row(
               children: [
                 AnimatedContainer(
@@ -215,13 +227,20 @@ class _BaseDashboardState extends State<BaseDashboard> {
         return Scaffold(
           appBar: AppBar(
             title: titleRow,
-            leading: Builder(
-              builder: (ctx) => IconButton(
-                icon: const Icon(LucideIcons.menu),
-                tooltip: 'Menu',
-                onPressed: () => Scaffold.of(ctx).openDrawer(),
-              ),
-            ),
+            // ✅ if canPop -> show back; else show hamburger
+            leading: canGoBack
+                ? IconButton(
+                    tooltip: 'Back',
+                    icon: const Icon(Icons.arrow_back),
+                    onPressed: () => Navigator.of(context).maybePop(),
+                  )
+                : Builder(
+                    builder: (ctx) => IconButton(
+                      icon: const Icon(LucideIcons.menu),
+                      tooltip: 'Menu',
+                      onPressed: () => Scaffold.of(ctx).openDrawer(),
+                    ),
+                  ),
             actions: actions,
           ),
           drawer: Drawer(

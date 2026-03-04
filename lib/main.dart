@@ -31,6 +31,10 @@ import 'package:property_manager_frontend/screens/admin/admin_properties.dart';
 import 'package:property_manager_frontend/screens/admin/admin_finance.dart';
 import 'package:property_manager_frontend/screens/admin/admin_maintenance.dart';
 import 'package:property_manager_frontend/screens/admin/admin_notifications.dart';
+import 'package:property_manager_frontend/screens/admin/admin_home.dart';
+import 'package:property_manager_frontend/screens/admin/admin_logs.dart';
+
+
 
 void main() {
   runApp(
@@ -160,6 +164,14 @@ class PropSmartApp extends StatelessWidget {
         '/admin_finance': (_) => const AdminFinanceScreen(),
         '/admin_maintenance': (_) => const AdminMaintenanceScreen(),
         '/admin_notifications': (_) => const AdminNotificationsScreen(),
+        '/admin_home': (_) => const AdminHome(),
+        '/admin_logs': (_) => const AdminLogsScreen(),
+
+        // stubs (so navigation won’t crash until we implement them)
+        '/admin_landlords': (_) => const Scaffold(body: Center(child: Text('Admin landlords coming soon'))),
+        '/admin_managers': (_) => const Scaffold(body: Center(child: Text('Admin managers/agencies coming soon'))),
+        '/admin_payouts': (_) => const Scaffold(body: Center(child: Text('Admin payouts coming soon'))),
+        '/admin_property_detail': (_) => const Scaffold(body: Center(child: Text('Admin property detail coming soon'))),
       },
       home: const LaunchDecider(),
     );
@@ -196,7 +208,10 @@ class _LaunchDeciderState extends State<LaunchDecider> {
         Navigator.of(context).pushReplacementNamed('/manager_dashboard');
         return;
       }
-
+      if (role == 'admin') {
+        Navigator.of(context).pushReplacementNamed('/dashboard');
+        return;
+      }
       // ✅ others use the common dashboard shell
       Navigator.of(context).pushReplacementNamed('/dashboard', arguments: {
         'role': role,
