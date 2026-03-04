@@ -1,13 +1,10 @@
 // lib/screens/admin/admin_maintenance.dart
 // ignore_for_file: avoid_print
 
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:lucide_icons/lucide_icons.dart';
-import 'package:http/http.dart' as http;
 
-import 'package:property_manager_frontend/core/config.dart';
-import 'package:property_manager_frontend/utils/token_manager.dart';
+import 'package:property_manager_frontend/services/admin_maintenance_service.dart';
 
 class AdminMaintenanceScreen extends StatefulWidget {
   const AdminMaintenanceScreen({super.key});
@@ -22,12 +19,23 @@ class _AdminMaintenanceScreenState extends State<AdminMaintenanceScreen> {
 
   List<Map<String, dynamic>> _rows = [];
   List<Map<String, dynamic>> _statuses = [];
-  int? _statusIdFilter;
+
+  String _q = '';
+  int? _statusId; // filter
+  bool _onlyOpen = false;
 
   @override
   void initState() {
     super.initState();
     _load();
+  }
+
+  void _goBack() {
+    if (Navigator.canPop(context)) {
+      Navigator.pop(context);
+    } else {
+      Navigator.pushReplacementNamed(context, '/dashboard');
+    }
   }
 
   Future<void> _load() async {
@@ -37,10 +45,15 @@ class _AdminMaintenanceScreenState extends State<AdminMaintenanceScreen> {
     });
 
     try {
-      await _loadStatuses();
-      await _loadRequests();
+      final statuses = await AdminMaintenanceService.listStatuses();
+      final rows = await AdminMaintenanceService.listAllRequests();
+
       if (!mounted) return;
-      setState(() => _loading = false);
+      setState(() {
+        _statuses = statuses;
+        _rows = rows;
+        _loading = false;
+      });
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -50,128 +63,188 @@ class _AdminMaintenanceScreenState extends State<AdminMaintenanceScreen> {
     }
   }
 
-  Future<void> _loadStatuses() async {
-    final headers = await TokenManager.authHeaders();
-    final uri = Uri.parse('${AppConfig.apiBaseUrl}/maintenance/status');
-    final res = await http.get(uri, headers: {'Content-Type': 'application/json', ...headers});
-    if (res.statusCode == 200) {
-      final data = jsonDecode(res.body);
-      if (data is List) {
-        _statuses = data.map((e) => (e as Map).cast<String, dynamic>()).toList();
-      }
-      return;
-    }
-    throw Exception('Failed to load statuses: ${res.statusCode} ${res.body}');
-  }
-
-  Future<void> _loadRequests() async {
-    final headers = await TokenManager.authHeaders();
-
-    final q = <String, String>{};
-    if (_statusIdFilter != null) q['status_id'] = '${_statusIdFilter!}';
-
-    final uri = Uri.parse('${AppConfig.apiBaseUrl}/maintenance').replace(queryParameters: q);
-
-    final res = await http.get(uri, headers: {'Content-Type': 'application/json', ...headers});
-    if (res.statusCode == 200) {
-      final data = jsonDecode(res.body);
-      if (data is List) {
-        _rows = data.map((e) => (e as Map).cast<String, dynamic>()).toList();
-      } else {
-        _rows = [];
-      }
-      return;
-    }
-    throw Exception('Failed to load maintenance: ${res.statusCode} ${res.body}');
+  String _statusNameById(int? id) {
+    if (id == null) return '';
+    final m = _statuses.firstWhere(
+      (s) => (s['id'] as num?)?.toInt() == id,
+      orElse: () => {},
+    );
+    return (m['name'] ?? '').toString();
   }
 
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context);
 
-    if (_loading) return const Center(child: CircularProgressIndicator());
-    if (_error != null) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(18),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(LucideIcons.alertTriangle),
-              const SizedBox(height: 10),
-              Text(_error!, textAlign: TextAlign.center),
-              const SizedBox(height: 12),
-              FilledButton(onPressed: _load, child: const Text('Retry')),
-            ],
-          ),
+    final filtered = _rows.where((r) {
+      final desc = (r['description'] ?? '').toString().toLowerCase();
+      final unit = (r['unit_id'] ?? '').toString().toLowerCase();
+      final tenant = (r['tenant_id'] ?? '').toString().toLowerCase();
+      final statusId = (r['status_id'] as num?)?.toInt();
+
+      if (_onlyOpen) {
+        // heuristic: status name contains "open"
+        final sName = _statusNameById(statusId).toLowerCase();
+        if (!sName.contains('open')) return false;
+      }
+
+      if (_statusId != null && statusId != _statusId) return false;
+
+      if (_q.trim().isEmpty) return true;
+      final q = _q.trim().toLowerCase();
+      return desc.contains(q) || unit.contains(q) || tenant.contains(q);
+    }).toList();
+
+    return Scaffold(
+      appBar: AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          tooltip: 'Back',
+          onPressed: _goBack,
         ),
-      );
-    }
-
-    return RefreshIndicator(
-      onRefresh: _load,
-      child: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text('Maintenance', style: t.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900)),
-              ),
-              DropdownButton<int?>(
-                value: _statusIdFilter,
-                hint: const Text('All'),
-                items: [
-                  const DropdownMenuItem<int?>(value: null, child: Text('All')),
-                  ..._statuses.map((s) {
-                    final id = (s['id'] as num?)?.toInt();
-                    final name = (s['name'] ?? '').toString();
-                    return DropdownMenuItem<int?>(
-                      value: id,
-                      child: Text(name),
-                    );
-                  }),
-                ],
-                onChanged: (v) async {
-                  setState(() => _statusIdFilter = v);
-                  setState(() => _loading = true);
-                  try {
-                    await _loadRequests();
-                    if (!mounted) return;
-                    setState(() => _loading = false);
-                  } catch (e) {
-                    if (!mounted) return;
-                    setState(() {
-                      _error = '$e';
-                      _loading = false;
-                    });
-                  }
-                },
-              ),
-            ],
+        title: const Text('Admin • Maintenance'),
+        actions: [
+          IconButton(
+            tooltip: 'Refresh',
+            icon: const Icon(LucideIcons.refreshCw),
+            onPressed: _load,
           ),
-          const SizedBox(height: 12),
-
-          if (_rows.isEmpty)
-            Text('No maintenance requests found.', style: t.textTheme.bodyMedium)
-          else
-            ..._rows.map((m) {
-              final id = (m['id'] as num?)?.toInt() ?? 0;
-              final desc = (m['description'] ?? '').toString();
-              final statusId = (m['status_id'] as num?)?.toInt();
-              final createdAt = (m['created_at'] ?? '').toString();
-              final unitId = (m['unit_id'] as num?)?.toInt();
-
-              return Card(
-                child: ListTile(
-                  leading: const Icon(LucideIcons.wrench),
-                  title: Text(desc, maxLines: 2, overflow: TextOverflow.ellipsis),
-                  subtitle: Text('ID: $id • Unit: ${unitId ?? '-'} • Status ID: ${statusId ?? '-'}\nCreated: $createdAt'),
-                ),
-              );
-            }),
+          const SizedBox(width: 6),
         ],
       ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : _error != null
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(18),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(LucideIcons.alertTriangle),
+                        const SizedBox(height: 10),
+                        Text(_error!, textAlign: TextAlign.center),
+                        const SizedBox(height: 12),
+                        FilledButton(onPressed: _load, child: const Text('Retry')),
+                      ],
+                    ),
+                  ),
+                )
+              : RefreshIndicator(
+                  onRefresh: _load,
+                  child: ListView(
+                    padding: const EdgeInsets.all(16),
+                    children: [
+                      TextField(
+                        decoration: const InputDecoration(
+                          prefixIcon: Icon(LucideIcons.search),
+                          labelText: 'Search (description / tenant / unit)',
+                          border: OutlineInputBorder(),
+                        ),
+                        onChanged: (v) => setState(() => _q = v),
+                      ),
+                      const SizedBox(height: 10),
+
+                      Row(
+                        children: [
+                          Expanded(
+                            child: DropdownButtonFormField<int?>(
+                              value: _statusId,
+                              decoration: const InputDecoration(
+                                labelText: 'Status',
+                                border: OutlineInputBorder(),
+                                prefixIcon: Icon(LucideIcons.flag),
+                              ),
+                              items: [
+                                const DropdownMenuItem<int?>(
+                                  value: null,
+                                  child: Text('All statuses'),
+                                ),
+                                ..._statuses.map((s) {
+                                  final id = (s['id'] as num?)?.toInt();
+                                  final name = (s['name'] ?? '').toString();
+                                  return DropdownMenuItem<int?>(
+                                    value: id,
+                                    child: Text(name.isEmpty ? 'Status $id' : name),
+                                  );
+                                }),
+                              ],
+                              onChanged: (v) => setState(() => _statusId = v),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          FilterChip(
+                            selected: _onlyOpen,
+                            label: const Text('Open only'),
+                            onSelected: (v) => setState(() => _onlyOpen = v),
+                          ),
+                        ],
+                      ),
+
+                      const SizedBox(height: 14),
+                      Text('${filtered.length} requests', style: t.textTheme.labelLarge),
+                      const SizedBox(height: 8),
+
+                      if (filtered.isEmpty)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 40),
+                          child: Column(
+                            children: [
+                              Icon(LucideIcons.wrench, size: 40, color: t.hintColor),
+                              const SizedBox(height: 8),
+                              const Text('No maintenance requests match your filter'),
+                            ],
+                          ),
+                        )
+                      else
+                        ...filtered.map((r) {
+                          final id = (r['id'] as num?)?.toInt() ?? 0;
+                          final tenantId = (r['tenant_id'] as num?)?.toInt() ?? 0;
+                          final unitId = (r['unit_id'] as num?)?.toInt() ?? 0;
+                          final statusId = (r['status_id'] as num?)?.toInt();
+                          final desc = (r['description'] ?? '').toString();
+                          final created = (r['created_at'] ?? '').toString();
+
+                          final sName = _statusNameById(statusId);
+                          final subtitle = 'Tenant: $tenantId • Unit: $unitId • ${sName.isEmpty ? 'status_id=$statusId' : sName}';
+
+                          return Card(
+                            child: ListTile(
+                              leading: const Icon(LucideIcons.wrench),
+                              title: Text(
+                                desc.isEmpty ? '(No description)' : desc,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              subtitle: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const SizedBox(height: 4),
+                                  Text(subtitle, maxLines: 2, overflow: TextOverflow.ellipsis),
+                                  const SizedBox(height: 6),
+                                  Text(
+                                    created,
+                                    style: t.textTheme.labelSmall?.copyWith(color: t.hintColor),
+                                  ),
+                                ],
+                              ),
+                              trailing: id == 0
+                                  ? null
+                                  : IconButton(
+                                      tooltip: 'Open details (stub)',
+                                      icon: const Icon(Icons.chevron_right),
+                                      onPressed: () {
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          SnackBar(content: Text('Open request #$id (details UI next)')),
+                                        );
+                                      },
+                                    ),
+                            ),
+                          );
+                        }),
+                    ],
+                  ),
+                ),
     );
   }
 }
