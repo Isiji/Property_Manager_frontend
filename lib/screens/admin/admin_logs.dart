@@ -1,7 +1,7 @@
-// lib/screens/admin/admin_logs.dart
 // ignore_for_file: avoid_print
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:lucide_icons/lucide_icons.dart';
 
@@ -34,6 +34,20 @@ class _AdminLogsScreenState extends State<AdminLogsScreen> {
     super.dispose();
   }
 
+  void _goBack() {
+    if (Navigator.canPop(context)) {
+      Navigator.pop(context);
+    } else {
+      Navigator.pushReplacementNamed(context, '/dashboard');
+    }
+  }
+
+  Future<void> _copy(String text, {String msg = 'Copied'}) async {
+    await Clipboard.setData(ClipboardData(text: text));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
   Future<void> _load() async {
     setState(() {
       _loading = true;
@@ -43,7 +57,9 @@ class _AdminLogsScreenState extends State<AdminLogsScreen> {
     try {
       final headers = await TokenManager.authHeaders();
       final q = _qCtrl.text.trim();
-      final url = Uri.parse('${AppConfig.apiBaseUrl}/audit-logs/me?limit=100${q.isEmpty ? '' : '&q=$q'}');
+      final url = Uri.parse(
+        '${AppConfig.apiBaseUrl}/audit-logs/me?limit=100${q.isEmpty ? '' : '&q=${Uri.encodeComponent(q)}'}',
+      );
 
       final res = await http.get(url, headers: {
         'Content-Type': 'application/json',
@@ -52,7 +68,7 @@ class _AdminLogsScreenState extends State<AdminLogsScreen> {
       });
 
       if (res.statusCode != 200) {
-        throw Exception('Failed to load logs: ${res.body}');
+        throw Exception('Failed to load logs: ${res.statusCode} ${res.body}');
       }
 
       final data = jsonDecode(res.body) as List;
@@ -62,7 +78,7 @@ class _AdminLogsScreenState extends State<AdminLogsScreen> {
       setState(() {});
     } catch (e) {
       if (!mounted) return;
-      setState(() => _error = e.toString());
+      setState(() => _error = '$e');
     } finally {
       if (!mounted) return;
       setState(() => _loading = false);
@@ -71,30 +87,33 @@ class _AdminLogsScreenState extends State<AdminLogsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      child: Padding(
+    final t = Theme.of(context);
+
+    return Scaffold(
+      appBar: AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          tooltip: 'Back',
+          onPressed: _goBack,
+        ),
+        title: const Text('Admin • Audit Logs'),
+        actions: [
+          IconButton(
+            tooltip: 'Refresh',
+            onPressed: _load,
+            icon: const Icon(LucideIcons.refreshCw),
+          ),
+          const SizedBox(width: 6),
+        ],
+      ),
+      body: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
-            Row(
-              children: [
-                Icon(LucideIcons.scrollText, color: Theme.of(context).colorScheme.primary),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    'Audit Logs (Admin)',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
-                  ),
-                ),
-                IconButton(onPressed: _load, tooltip: 'Refresh', icon: const Icon(Icons.refresh)),
-              ],
-            ),
-            const SizedBox(height: 12),
-
             TextField(
               controller: _qCtrl,
               decoration: const InputDecoration(
-                labelText: "Search logs (action/message)",
+                labelText: "Search logs (action/message/property)",
                 prefixIcon: Icon(LucideIcons.search),
                 border: OutlineInputBorder(),
               ),
@@ -102,9 +121,14 @@ class _AdminLogsScreenState extends State<AdminLogsScreen> {
             ),
             const SizedBox(height: 10),
 
-            if (_loading) const Expanded(child: Center(child: CircularProgressIndicator()))
+            if (_loading)
+              const Expanded(child: Center(child: CircularProgressIndicator()))
             else if (_error != null)
-              Expanded(child: Center(child: Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error))))
+              Expanded(
+                child: Center(
+                  child: Text(_error!, style: TextStyle(color: t.colorScheme.error)),
+                ),
+              )
             else if (_rows.isEmpty)
               const Expanded(child: Center(child: Text('No logs')))
             else
@@ -114,21 +138,26 @@ class _AdminLogsScreenState extends State<AdminLogsScreen> {
                   separatorBuilder: (_, __) => const SizedBox(height: 10),
                   itemBuilder: (context, i) {
                     final r = _rows[i];
+
                     final action = (r['action'] ?? '-').toString();
                     final entityType = (r['entity_type'] ?? '-').toString();
+                    final entityId = (r['entity_id'] ?? '-').toString();
+
                     final message = (r['message'] ?? '').toString();
                     final at = (r['created_at'] ?? '').toString();
+
                     final propName = (r['property_name'] ?? '-').toString();
                     final propCode = (r['property_code'] ?? '-').toString();
+
                     final actorRole = (r['actor_role'] ?? '-').toString();
                     final actorId = (r['actor_id'] ?? '-').toString();
 
                     return Container(
                       padding: const EdgeInsets.all(14),
                       decoration: BoxDecoration(
-                        color: Theme.of(context).colorScheme.surface,
+                        color: t.colorScheme.surface,
                         borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: Theme.of(context).dividerColor.withOpacity(.25)),
+                        border: Border.all(color: t.dividerColor.withOpacity(.25)),
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -140,30 +169,51 @@ class _AdminLogsScreenState extends State<AdminLogsScreen> {
                                 height: 34,
                                 decoration: BoxDecoration(
                                   borderRadius: BorderRadius.circular(12),
-                                  color: Theme.of(context).colorScheme.primary.withOpacity(.10),
+                                  color: t.colorScheme.primary.withOpacity(.10),
                                 ),
-                                child: Icon(LucideIcons.fileText, size: 18, color: Theme.of(context).colorScheme.primary),
+                                child: Icon(LucideIcons.fileText, size: 18, color: t.colorScheme.primary),
                               ),
                               const SizedBox(width: 10),
                               Expanded(
                                 child: Text(
                                   action,
-                                  style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w900),
+                                  style: t.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w900),
                                 ),
                               ),
-                              Text(at, style: Theme.of(context).textTheme.bodySmall),
+                              Text(at, style: t.textTheme.bodySmall),
                             ],
                           ),
                           const SizedBox(height: 8),
-                          Text('Entity: $entityType', style: Theme.of(context).textTheme.bodySmall),
+
+                          Text('Entity: $entityType • $entityId', style: t.textTheme.bodySmall),
                           const SizedBox(height: 4),
-                          Text('Property: $propName • $propCode', style: Theme.of(context).textTheme.bodySmall),
+                          Text('Property: $propName • $propCode', style: t.textTheme.bodySmall),
                           const SizedBox(height: 4),
-                          Text('Actor: $actorRole • $actorId', style: Theme.of(context).textTheme.bodySmall),
+                          Text('Actor: $actorRole • $actorId', style: t.textTheme.bodySmall),
+
                           if (message.isNotEmpty) ...[
                             const SizedBox(height: 8),
                             Text(message),
-                          ]
+                          ],
+
+                          const SizedBox(height: 10),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              if (propCode.trim().isNotEmpty && propCode != '-')
+                                TextButton.icon(
+                                  onPressed: () => _copy(propCode, msg: 'Property code copied'),
+                                  icon: const Icon(LucideIcons.copy, size: 16),
+                                  label: const Text('Copy code'),
+                                ),
+                              TextButton.icon(
+                                onPressed: () => _copy(jsonEncode(r), msg: 'Log JSON copied'),
+                                icon: const Icon(LucideIcons.copy, size: 16),
+                                label: const Text('Copy JSON'),
+                              ),
+                            ],
+                          )
                         ],
                       ),
                     );

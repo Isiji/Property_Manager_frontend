@@ -33,6 +33,9 @@ import 'package:property_manager_frontend/screens/admin/admin_maintenance.dart';
 import 'package:property_manager_frontend/screens/admin/admin_notifications.dart';
 import 'package:property_manager_frontend/screens/admin/admin_home.dart';
 import 'package:property_manager_frontend/screens/admin/admin_logs.dart';
+import 'package:property_manager_frontend/screens/admin/admin_landlords.dart';
+import 'package:property_manager_frontend/screens/admin/admin_managers.dart';
+import 'package:property_manager_frontend/screens/admin/admin_payouts.dart';
 
 
 
@@ -168,10 +171,9 @@ class PropSmartApp extends StatelessWidget {
         '/admin_logs': (_) => const AdminLogsScreen(),
 
         // stubs (so navigation won’t crash until we implement them)
-        '/admin_landlords': (_) => const Scaffold(body: Center(child: Text('Admin landlords coming soon'))),
-        '/admin_managers': (_) => const Scaffold(body: Center(child: Text('Admin managers/agencies coming soon'))),
-        '/admin_payouts': (_) => const Scaffold(body: Center(child: Text('Admin payouts coming soon'))),
-        '/admin_property_detail': (_) => const Scaffold(body: Center(child: Text('Admin property detail coming soon'))),
+        '/admin_landlords': (_) => const AdminLandlordsScreen(),
+        '/admin_managers': (_) => const AdminManagersScreen(),
+        '/admin_payouts': (_) => const AdminPayoutsScreen(),        '/admin_property_detail': (_) => const Scaffold(body: Center(child: Text('Admin property detail coming soon'))),
       },
       home: const LaunchDecider(),
     );

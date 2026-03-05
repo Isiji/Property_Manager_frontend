@@ -152,7 +152,7 @@ class _AdminNotificationsScreenState extends State<AdminNotificationsScreen> {
                           const SizedBox(width: 10),
                           Expanded(
                             child: DropdownButtonFormField<String>(
-                              value: _filter,
+                              initialValue: _filter,
                               decoration: const InputDecoration(
                                 labelText: 'Filter',
                                 border: OutlineInputBorder(),

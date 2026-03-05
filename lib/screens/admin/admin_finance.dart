@@ -243,7 +243,7 @@ class _AdminFinanceScreenState extends State<AdminFinanceScreen> with SingleTick
             const SizedBox(width: 10),
             Expanded(
               child: DropdownButtonFormField<int>(
-                value: _year,
+                initialValue: _year,
                 decoration: const InputDecoration(
                   labelText: 'Year',
                   border: OutlineInputBorder(),
@@ -258,7 +258,7 @@ class _AdminFinanceScreenState extends State<AdminFinanceScreen> with SingleTick
             const SizedBox(width: 10),
             Expanded(
               child: DropdownButtonFormField<int>(
-                value: _month,
+                initialValue: _month,
                 decoration: const InputDecoration(
                   labelText: 'Month',
                   border: OutlineInputBorder(),

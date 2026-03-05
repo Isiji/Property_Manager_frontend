@@ -48,19 +48,19 @@ class LeaseService {
 
   static Future<void> endLease({required int leaseId, required String endDate}) async {
     final h = await _auth();
-    Future<http.Response> _post(Uri u) =>
+    Future<http.Response> post(Uri u) =>
         http.post(u, headers: _json(h), body: jsonEncode({'end_date': endDate}));
 
     final u1 = Uri.parse('${AppConfig.apiBaseUrl}/leases/$leaseId/end');
     final u2 = Uri.parse('${AppConfig.apiBaseUrl}/leases/$leaseId/end/');
     print('[LeaseService] POST $u1');
-    var r = await _post(u1);
+    var r = await post(u1);
     print('[LeaseService] ← ${r.statusCode} ${r.body}');
     if (r.statusCode == 200) return;
 
     if (r.statusCode == 404 || r.statusCode == 307 || r.statusCode == 308) {
       print('[LeaseService] Retry with slash: $u2');
-      r = await _post(u2);
+      r = await post(u2);
       print('[LeaseService] ← ${r.statusCode} ${r.body}');
       if (r.statusCode == 200) return;
     }

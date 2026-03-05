@@ -107,7 +107,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
                   // Role selector
                   DropdownButtonFormField<String>(
-                    value: selectedRole,
+                    initialValue: selectedRole,
                     items: roles
                         .map(
                           (r) => DropdownMenuItem(

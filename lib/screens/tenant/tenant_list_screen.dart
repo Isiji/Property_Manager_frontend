@@ -17,7 +17,7 @@ class TenantListScreen extends StatefulWidget {
 class _TenantListScreenState extends State<TenantListScreen> {
   final _searchCtrl = TextEditingController();
   Future<List<TenantDto>>? _futureTenants;
-  bool _loading = false;
+  final bool _loading = false;
 
   @override
   void initState() {

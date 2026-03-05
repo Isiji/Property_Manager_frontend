@@ -16,8 +16,7 @@ import 'package:property_manager_frontend/screens/landlord/landlord_reports.dart
 
 class LandlordPropertyUnits extends StatefulWidget {
   final int propertyId;
-  const LandlordPropertyUnits({Key? key, required this.propertyId})
-      : super(key: key);
+  const LandlordPropertyUnits({super.key, required this.propertyId});
 
   @override
   State<LandlordPropertyUnits> createState() => _LandlordPropertyUnitsState();
@@ -1181,7 +1180,7 @@ class _CollectionsReportCard extends StatelessWidget {
 class _UnitDialog extends StatefulWidget {
   final String? initialNumber;
   final String? initialRent;
-  const _UnitDialog({Key? key, this.initialNumber, this.initialRent}) : super(key: key);
+  const _UnitDialog({this.initialNumber, this.initialRent});
 
   @override
   State<_UnitDialog> createState() => _UnitDialogState();
@@ -1253,7 +1252,7 @@ class _UnitDialogState extends State<_UnitDialog> {
 
 class _PaymentDialog extends StatefulWidget {
   final String? initialAmount;
-  const _PaymentDialog({Key? key, this.initialAmount}) : super(key: key);
+  const _PaymentDialog({this.initialAmount});
   @override
   State<_PaymentDialog> createState() => _PaymentDialogState();
 }
@@ -1311,7 +1310,7 @@ class _PaymentDialogState extends State<_PaymentDialog> {
 class _AssignTenantDialog extends StatefulWidget {
   final String unitLabel;
   final String? initialRent;
-  const _AssignTenantDialog({Key? key, required this.unitLabel, this.initialRent}) : super(key: key);
+  const _AssignTenantDialog({required this.unitLabel, this.initialRent});
   @override
   State<_AssignTenantDialog> createState() => _AssignTenantDialogState();
 }

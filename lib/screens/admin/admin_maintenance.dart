@@ -149,7 +149,7 @@ class _AdminMaintenanceScreenState extends State<AdminMaintenanceScreen> {
                         children: [
                           Expanded(
                             child: DropdownButtonFormField<int?>(
-                              value: _statusId,
+                              initialValue: _statusId,
                               decoration: const InputDecoration(
                                 labelText: 'Status',
                                 border: OutlineInputBorder(),

@@ -80,14 +80,14 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
 
       try {
         final pays = await TenantPortalService.getPayments();
-        _payments = pays is List ? pays : const [];
+        _payments = pays;
       } catch (_) {
         _payments = const [];
       }
 
       try {
         final mnts = await TenantPortalService.getMaintenance();
-        _tickets = mnts is List ? mnts : const [];
+        _tickets = mnts;
       } catch (_) {
         _tickets = const [];
       }
@@ -148,7 +148,7 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
                 Navigator.pop(context);
                 ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Request submitted')));
                 final m = await TenantPortalService.getMaintenance();
-                setState(() => _tickets = m is List ? m : const []);
+                setState(() => _tickets = m);
               } catch (e) {
                 if (!mounted) return;
                 ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Submit failed: $e')));
@@ -571,7 +571,7 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: t.colorScheme.surfaceVariant.withOpacity(.4),
+        color: t.colorScheme.surfaceContainerHighest.withOpacity(.4),
         borderRadius: BorderRadius.circular(999),
       ),
       child: Row(

@@ -233,7 +233,7 @@ class _AgencyAgentsScreenState extends State<AgencyAgentsScreen>
               ),
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
-                value: staffRole,
+                initialValue: staffRole,
                 items: const [
                   DropdownMenuItem(value: 'manager_staff', child: Text('Staff (Agent)')),
                   DropdownMenuItem(value: 'finance', child: Text('Finance')),
@@ -321,7 +321,7 @@ class _AgencyAgentsScreenState extends State<AgencyAgentsScreen>
         title: const Text('Assign property to staff'),
         content: DropdownButtonFormField<int>(
           isExpanded: true,
-          value: selectedPropertyId,
+          initialValue: selectedPropertyId,
           items: _properties.map((p) {
             final m = Map<String, dynamic>.from(p as Map);
             final id = (m['id'] as num?)?.toInt() ?? 0;
@@ -486,7 +486,7 @@ class _AgencyAgentsScreenState extends State<AgencyAgentsScreen>
         title: const Text('Assign property to external agent'),
         content: DropdownButtonFormField<int>(
           isExpanded: true,
-          value: selectedPropertyId,
+          initialValue: selectedPropertyId,
           items: _properties.map((p) {
             final m = Map<String, dynamic>.from(p as Map);
             final id = (m['id'] as num?)?.toInt() ?? 0;

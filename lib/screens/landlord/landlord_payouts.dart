@@ -307,7 +307,7 @@ class _PayoutDialogState extends State<_PayoutDialog> {
             mainAxisSize: MainAxisSize.min,
             children: [
               DropdownButtonFormField<String>(
-                value: _type,
+                initialValue: _type,
                 items: const [
                   DropdownMenuItem(value: 'mpesa_paybill', child: Text('M-Pesa Paybill')),
                   DropdownMenuItem(value: 'mpesa_till', child: Text('M-Pesa Till')),
