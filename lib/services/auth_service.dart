@@ -7,7 +7,7 @@ import 'package:property_manager_frontend/utils/token_manager.dart';
 
 class AuthService {
   /// =============================
-  /// 🔹 REGISTER USER
+  /// REGISTER USER
   /// =============================
   static Future<Map<String, dynamic>> registerUser({
     required String name,
@@ -19,9 +19,7 @@ class AuthService {
     int? unitId,
     String? unitNumber,
     String? idNumber,
-
-    // ✅ NEW: manager org type + agency extras
-    String? managerType,     // "individual" | "agency"
+    String? managerType,
     String? companyName,
     String? contactPerson,
     String? officePhone,
@@ -29,12 +27,15 @@ class AuthService {
   }) async {
     final r = role.trim().toLowerCase();
 
-    // Non-tenant roles require password
+    // ✅ public registration is blocked for admin/super_admin
+    if (r == 'admin' || r == 'super_admin') {
+      throw Exception('$r self-registration is disabled.');
+    }
+
     if (r != 'tenant' && (password == null || password.trim().isEmpty)) {
       throw Exception('Password is required for $r registration.');
     }
 
-    // Tenant requires propertyCode + unitId OR unitNumber
     if (r == 'tenant') {
       if (propertyCode == null || propertyCode.trim().isEmpty) {
         throw Exception('Property code is required for tenant registration.');
@@ -54,16 +55,10 @@ class AuthService {
       'email': (email == null || email.trim().isEmpty) ? null : email.trim(),
       'password': (password == null || password.trim().isEmpty) ? null : password.trim(),
       'role': r,
-
-      // tenant fields
       'property_code': (propertyCode == null || propertyCode.trim().isEmpty) ? null : propertyCode.trim(),
       'unit_id': unitId,
       'unit_number': (unitNumber == null || unitNumber.trim().isEmpty) ? null : unitNumber.trim(),
-
-      // id number
       'id_number': (idNumber == null || idNumber.trim().isEmpty) ? null : idNumber.trim(),
-
-      // ✅ manager/agency extras (backend can ignore if not implemented yet)
       'manager_type': (managerType == null || managerType.trim().isEmpty) ? null : managerType.trim(),
       'company_name': (companyName == null || companyName.trim().isEmpty) ? null : companyName.trim(),
       'contact_person': (contactPerson == null || contactPerson.trim().isEmpty) ? null : contactPerson.trim(),
@@ -94,7 +89,7 @@ class AuthService {
   }
 
   /// =============================
-  /// 🔹 LOGIN USER
+  /// LOGIN USER
   /// =============================
   static Future<Map<String, dynamic>> loginUser({
     required String phone,
@@ -127,7 +122,8 @@ class AuthService {
     if (response.statusCode == 200) {
       final data = jsonDecode(response.body) as Map<String, dynamic>;
       final token = data['access_token'];
-      final userId = data['id'] ?? 0;
+      final userId = (data['id'] as num?)?.toInt() ?? 0;
+      final managerId = (data['manager_id'] as num?)?.toInt();
 
       if (token == null) {
         throw Exception('Missing access token in response');
@@ -137,15 +133,21 @@ class AuthService {
       final roleFromToken = (decoded['role'] ?? r).toString();
 
       print('🔑 Decoded Token: $decoded');
-      print('✅ Login success: role=$roleFromToken, id=$userId');
+      print('✅ Login success: role=$roleFromToken, id=$userId, managerId=$managerId');
 
       await TokenManager.saveSession(
         token: token,
         role: roleFromToken,
         userId: userId,
+        managerId: managerId,
       );
 
-      return {'token': token, 'role': roleFromToken, 'userId': userId};
+      return {
+        'token': token,
+        'role': roleFromToken,
+        'userId': userId,
+        'managerId': managerId,
+      };
     } else {
       print('❌ Login failed: ${response.statusCode} ${response.body}');
       throw Exception('Login failed: ${response.body}');

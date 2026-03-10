@@ -13,27 +13,28 @@ class RegisterScreen extends StatefulWidget {
 class _RegisterScreenState extends State<RegisterScreen> {
   final _formKey = GlobalKey<FormState>();
 
-  // Shared inputs (labels change depending on manager type)
+  // Shared inputs
   final _nameController = TextEditingController();
   final _phoneController = TextEditingController();
-  final _emailController = TextEditingController(); // optional
-  final _idController = TextEditingController(); // optional National ID
-  final _passwordController = TextEditingController(); // required for non-tenant
+  final _emailController = TextEditingController();
+  final _idController = TextEditingController();
+  final _passwordController = TextEditingController();
 
   // Tenant-only
   final _propertyCodeController = TextEditingController();
   final _unitLabelController = TextEditingController();
 
   // Agency optional extras
-  final _contactPersonController = TextEditingController(); // optional
-  final _officePhoneController = TextEditingController(); // optional override
-  final _officeEmailController = TextEditingController(); // optional override
+  final _contactPersonController = TextEditingController();
+  final _officePhoneController = TextEditingController();
+  final _officeEmailController = TextEditingController();
 
   String _selectedRole = 'tenant';
   String _managerType = 'individual'; // individual | agency
   bool _loading = false;
 
-  final List<String> _roles = ['tenant', 'landlord', 'manager', 'admin'];
+  // ✅ admin removed from self-registration
+  final List<String> _roles = ['tenant', 'landlord', 'manager'];
 
   bool get _isTenant => _selectedRole == 'tenant';
   bool get _isManager => _selectedRole == 'manager';
@@ -60,13 +61,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
     setState(() {
       _selectedRole = val ?? 'tenant';
 
-      // clear tenant fields if not tenant
       if (!_isTenant) {
         _propertyCodeController.clear();
         _unitLabelController.clear();
       }
 
-      // clear manager extras if not manager
       if (!_isManager) {
         _managerType = 'individual';
         _contactPersonController.clear();
@@ -91,11 +90,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
       final email = _emailController.text.trim().isEmpty ? null : _emailController.text.trim();
       final idNumber = _idController.text.trim().isEmpty ? null : _idController.text.trim();
 
-      // Tenant
       final propertyCode = _isTenant ? _propertyCodeController.text.trim() : null;
       final unitNumber = _isTenant ? _unitLabelController.text.trim() : null;
 
-      // Agency mapping (avoid double entry)
       final companyName = _isAgency ? _nameController.text.trim() : null;
 
       final companyOfficePhone = _isAgency
@@ -112,7 +109,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
           ? (_contactPersonController.text.trim().isEmpty ? null : _contactPersonController.text.trim())
           : null;
 
-      // 1) Register
       await AuthService.registerUser(
         name: _nameController.text.trim(),
         phone: _phoneController.text.trim(),
@@ -124,16 +120,13 @@ class _RegisterScreenState extends State<RegisterScreen> {
         role: _selectedRole,
         propertyCode: propertyCode,
         unitNumber: unitNumber,
-
-        // manager / agency extras
-        managerType: _isManager ? _managerType : null, // ✅ no unused local variable now
+        managerType: _isManager ? _managerType : null,
         companyName: companyName,
         contactPerson: contactPerson,
         officePhone: companyOfficePhone,
         officeEmail: (companyOfficeEmail?.trim().isEmpty == true) ? null : companyOfficeEmail,
       );
 
-      // 2) Auto-login
       final login = await AuthService.loginUser(
         phone: _phoneController.text.trim(),
         password: _isTenant
@@ -158,9 +151,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
           break;
         case 'manager':
           Navigator.of(context).pushReplacementNamed('/manager_dashboard');
-          break;
-        case 'admin':
-          Navigator.of(context).pushReplacementNamed('/admin_dashboard');
           break;
         default:
           Navigator.of(context).pushReplacementNamed('/login');
@@ -213,9 +203,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         ),
                         textAlign: TextAlign.center,
                       ),
+                      const SizedBox(height: 12),
+                      Text(
+                        "Public signup is available for tenants, landlords, and managers only.",
+                        style: theme.textTheme.bodySmall,
+                        textAlign: TextAlign.center,
+                      ),
                       const SizedBox(height: 20),
 
-                      // ✅ Role FIRST
                       DropdownButtonFormField<String>(
                         initialValue: _selectedRole,
                         items: _roles
@@ -232,7 +227,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         ),
                       ),
 
-                      // ✅ Manager type SECOND (only if manager)
                       if (_isManager) ...[
                         const SizedBox(height: 12),
                         Align(

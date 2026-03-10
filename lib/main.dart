@@ -1,4 +1,3 @@
-// lib/main.dart
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -23,10 +22,9 @@ import 'package:property_manager_frontend/providers/theme_provider.dart';
 import 'package:property_manager_frontend/utils/token_manager.dart';
 import 'package:property_manager_frontend/screens/lease/lease_view.dart';
 
-// ✅ manager router (agency vs individual)
 import 'package:property_manager_frontend/screens/manager/manager_dashboard_router.dart';
 
-// ✅ Admin screens
+// Admin screens
 import 'package:property_manager_frontend/screens/admin/admin_properties.dart';
 import 'package:property_manager_frontend/screens/admin/admin_finance.dart';
 import 'package:property_manager_frontend/screens/admin/admin_maintenance.dart';
@@ -37,7 +35,9 @@ import 'package:property_manager_frontend/screens/admin/admin_landlords.dart';
 import 'package:property_manager_frontend/screens/admin/admin_managers.dart';
 import 'package:property_manager_frontend/screens/admin/admin_payouts.dart';
 
-
+// Super admin screens
+import 'package:property_manager_frontend/screens/super_admin/super_admin_home.dart';
+import 'package:property_manager_frontend/screens/super_admin/super_admin_admins.dart';
 
 void main() {
   runApp(
@@ -85,27 +85,23 @@ class PropSmartApp extends StatelessWidget {
         '/settings': (_) => const SettingsScreen(),
         '/tenant_home': (_) => const TenantHome(),
 
-        // ✅ One common dashboard shell (landlord/admin/tenant)
         '/dashboard': (_) => const DashboardShell(),
-
         '/lease_view': (ctx) => const LeaseViewScreen(),
 
         '/landlord_maintenance_inbox': (ctx) => const LandlordMaintenanceInbox(),
         '/manager_maintenance_inbox': (ctx) => const LandlordMaintenanceInbox(forManager: true),
 
-        // ✅ Route aliases (old routes still work)
         '/landlord_dashboard': (_) => const DashboardShell(),
-
-        // ✅ managers must route agency vs individual
         '/manager_dashboard': (_) => const ManagerDashboardRouter(),
-
         '/admin_dashboard': (_) => const DashboardShell(),
         '/tenant_dashboard': (_) => const DashboardShell(),
+
+        '/super_admin_dashboard': (_) => const SuperAdminHomeScreen(),
+        '/super_admin_admins': (_) => const SuperAdminAdminsScreen(),
 
         '/landlord_payouts': (_) => const LandlordPayoutsScreen(),
         '/landlord_overview': (_) => const LandlordOverview(),
 
-        // ✅ Manager screens
         '/manager_properties': (_) => const ManagerPropertiesScreen(),
 
         '/manager_payments': (context) {
@@ -146,9 +142,8 @@ class PropSmartApp extends StatelessWidget {
           );
         },
 
-        // ✅ Landlord property units page (also used by admin drilldown)
         '/landlord_property_units': (context) {
-          final args = ModalRoute.of(context)!.settings.arguments;
+          final args = ModalRoute.of(context)?.settings.arguments;
           int propertyId;
           if (args is int) {
             propertyId = args;
@@ -161,26 +156,24 @@ class PropSmartApp extends StatelessWidget {
           }
           return LandlordPropertyUnits(propertyId: propertyId);
         },
-
-        // ✅ Admin routes
         '/admin_properties': (_) => const AdminPropertiesScreen(),
         '/admin_finance': (_) => const AdminFinanceScreen(),
         '/admin_maintenance': (_) => const AdminMaintenanceScreen(),
         '/admin_notifications': (_) => const AdminNotificationsScreen(),
         '/admin_home': (_) => const AdminHome(),
         '/admin_logs': (_) => const AdminLogsScreen(),
-
-        // stubs (so navigation won’t crash until we implement them)
         '/admin_landlords': (_) => const AdminLandlordsScreen(),
         '/admin_managers': (_) => const AdminManagersScreen(),
-        '/admin_payouts': (_) => const AdminPayoutsScreen(),        '/admin_property_detail': (_) => const Scaffold(body: Center(child: Text('Admin property detail coming soon'))),
+        '/admin_payouts': (_) => const AdminPayoutsScreen(),
+        '/admin_property_detail': (_) => const Scaffold(
+              body: Center(child: Text('Admin property detail coming soon')),
+            ),
       },
       home: const LaunchDecider(),
     );
   }
 }
 
-/// Decides navigation based on saved session
 class LaunchDecider extends StatefulWidget {
   const LaunchDecider({super.key});
 
@@ -205,16 +198,21 @@ class _LaunchDeciderState extends State<LaunchDecider> {
       final role = session.role;
       debugPrint('[LaunchDecider] Logged in as $role');
 
-      // ✅ IMPORTANT: managers must go through manager router
       if (role == 'manager') {
         Navigator.of(context).pushReplacementNamed('/manager_dashboard');
         return;
       }
+
+      if (role == 'super_admin') {
+        Navigator.of(context).pushReplacementNamed('/super_admin_dashboard');
+        return;
+      }
+
       if (role == 'admin') {
         Navigator.of(context).pushReplacementNamed('/dashboard');
         return;
       }
-      // ✅ others use the common dashboard shell
+
       Navigator.of(context).pushReplacementNamed('/dashboard', arguments: {
         'role': role,
         'userId': session.userId,

@@ -16,7 +16,7 @@ class _LoginScreenState extends State<LoginScreen> {
   String selectedRole = 'landlord';
   bool isLoading = false;
 
-  final List<String> roles = ['admin', 'landlord', 'manager', 'tenant'];
+  final List<String> roles = ['super_admin', 'admin', 'landlord', 'manager', 'tenant'];
 
   @override
   void dispose() {
@@ -36,12 +36,19 @@ class _LoginScreenState extends State<LoginScreen> {
       return;
     }
 
+    if (selectedRole != 'tenant' && pwd.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Password is required')),
+      );
+      return;
+    }
+
     setState(() => isLoading = true);
 
     try {
       final result = await AuthService.loginUser(
         phone: phone,
-        password: selectedRole == 'tenant' ? null : pwd, // tenant can be passwordless
+        password: selectedRole == 'tenant' ? null : pwd,
         role: selectedRole,
       );
 
@@ -52,6 +59,9 @@ class _LoginScreenState extends State<LoginScreen> {
       if (!mounted) return;
 
       switch (role) {
+        case 'super_admin':
+          Navigator.pushReplacementNamed(context, '/super_admin_dashboard');
+          break;
         case 'landlord':
           Navigator.pushReplacementNamed(context, '/dashboard');
           break;
@@ -59,7 +69,6 @@ class _LoginScreenState extends State<LoginScreen> {
           Navigator.pushReplacementNamed(context, '/manager_dashboard');
           break;
         case 'tenant':
-          // NEW: send tenants to the new tenant portal
           Navigator.pushReplacementNamed(context, '/tenant_home');
           break;
         case 'admin':
@@ -83,6 +92,8 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final showPassword = selectedRole != 'tenant';
+
     return Scaffold(
       backgroundColor: Colors.grey.shade100,
       body: Center(
@@ -105,7 +116,6 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const SizedBox(height: 24),
 
-                  // Role selector
                   DropdownButtonFormField<String>(
                     initialValue: selectedRole,
                     items: roles
@@ -125,7 +135,6 @@ class _LoginScreenState extends State<LoginScreen> {
 
                   const SizedBox(height: 16),
 
-                  // Phone
                   TextField(
                     controller: phoneController,
                     decoration: const InputDecoration(
@@ -137,8 +146,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
                   const SizedBox(height: 16),
 
-                  // Password (hidden for tenant)
-                  if (selectedRole != 'tenant')
+                  if (showPassword)
                     TextField(
                       controller: passwordController,
                       obscureText: true,
@@ -150,7 +158,6 @@ class _LoginScreenState extends State<LoginScreen> {
 
                   const SizedBox(height: 24),
 
-                  // Login button
                   ElevatedButton(
                     onPressed: isLoading ? null : _handleLogin,
                     style: ElevatedButton.styleFrom(
@@ -163,7 +170,6 @@ class _LoginScreenState extends State<LoginScreen> {
 
                   const SizedBox(height: 12),
 
-                  // Register link
                   TextButton(
                     onPressed: () => Navigator.pushReplacementNamed(context, '/register'),
                     child: const Text("Don't have an account? Register here"),

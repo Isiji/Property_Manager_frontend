@@ -9,7 +9,7 @@ const String kNgrokBypassValue = 'true';
 
 class AuthSession {
   final String token;
-  final String role; // admin | landlord | manager | tenant
+  final String role; // super_admin | admin | landlord | manager | tenant
   final int userId; // for manager: staff id
   final int? managerId; // for manager: org id
   final DateTime expiresAt;

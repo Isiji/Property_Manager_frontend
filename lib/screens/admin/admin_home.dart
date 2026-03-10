@@ -1,6 +1,6 @@
-// lib/screens/admin/admin_home.dart
 import 'package:flutter/material.dart';
 import 'package:lucide_icons/lucide_icons.dart';
+import 'package:property_manager_frontend/utils/token_manager.dart';
 
 class AdminHome extends StatelessWidget {
   const AdminHome({super.key});
@@ -47,34 +47,47 @@ class AdminHome extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      // ✅ guarantees Material ancestor even if embedded
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: ListView(
-          children: [
-            Text(
-              'System Control Center',
-              style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w900),
+    return FutureBuilder(
+      future: TokenManager.loadSession(),
+      builder: (context, snapshot) {
+        final role = snapshot.data?.role;
+
+        return Material(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: ListView(
+              children: [
+                Text(
+                  'System Control Center',
+                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w900),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Admin resolves disputes, audits activity, and manages all parties.',
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+                const SizedBox(height: 16),
+
+                if (role == 'super_admin') ...[
+                  _tile(context, LucideIcons.shieldCheck, 'Admin Management',
+                      'Create, activate, deactivate, and remove admins', '/super_admin_admins'),
+                  const SizedBox(height: 10),
+                ],
+
+                _tile(context, LucideIcons.building2, 'Properties', 'View all properties in the system', '/admin_properties'),
+                const SizedBox(height: 10),
+                _tile(context, LucideIcons.users, 'Landlords', 'Manage landlords (support & issues)', '/admin_landlords'),
+                const SizedBox(height: 10),
+                _tile(context, LucideIcons.building, 'Managers/Agencies', 'Manage agencies and managers', '/admin_managers'),
+                const SizedBox(height: 10),
+                _tile(context, LucideIcons.wallet, 'Payouts', 'See all payouts and disputes', '/admin_payouts'),
+                const SizedBox(height: 10),
+                _tile(context, LucideIcons.scrollText, 'Audit Logs', 'Track actions across the system', '/admin_logs'),
+              ],
             ),
-            const SizedBox(height: 6),
-            Text(
-              'Admin resolves disputes, audits activity, and manages all parties (landlords, managers, agencies).',
-              style: Theme.of(context).textTheme.bodyMedium,
-            ),
-            const SizedBox(height: 16),
-            _tile(context, LucideIcons.building2, 'Properties', 'View all properties in the system', '/admin_properties'),
-            const SizedBox(height: 10),
-            _tile(context, LucideIcons.users, 'Landlords', 'Manage landlords (support & issues)', '/admin_landlords'),
-            const SizedBox(height: 10),
-            _tile(context, LucideIcons.building, 'Managers/Agencies', 'Manage agencies and managers', '/admin_managers'),
-            const SizedBox(height: 10),
-            _tile(context, LucideIcons.wallet, 'Payouts', 'See all payouts and disputes', '/admin_payouts'),
-            const SizedBox(height: 10),
-            _tile(context, LucideIcons.scrollText, 'Audit Logs', 'Track actions across the system', '/admin_logs'),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 }
