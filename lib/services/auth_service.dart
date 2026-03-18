@@ -27,7 +27,6 @@ class AuthService {
   }) async {
     final r = role.trim().toLowerCase();
 
-    // ✅ public registration is blocked for admin/super_admin
     if (r == 'admin' || r == 'super_admin') {
       throw Exception('$r self-registration is disabled.');
     }
@@ -55,15 +54,31 @@ class AuthService {
       'email': (email == null || email.trim().isEmpty) ? null : email.trim(),
       'password': (password == null || password.trim().isEmpty) ? null : password.trim(),
       'role': r,
-      'property_code': (propertyCode == null || propertyCode.trim().isEmpty) ? null : propertyCode.trim(),
+      'property_code': (propertyCode == null || propertyCode.trim().isEmpty)
+          ? null
+          : propertyCode.trim(),
       'unit_id': unitId,
-      'unit_number': (unitNumber == null || unitNumber.trim().isEmpty) ? null : unitNumber.trim(),
-      'id_number': (idNumber == null || idNumber.trim().isEmpty) ? null : idNumber.trim(),
-      'manager_type': (managerType == null || managerType.trim().isEmpty) ? null : managerType.trim(),
-      'company_name': (companyName == null || companyName.trim().isEmpty) ? null : companyName.trim(),
-      'contact_person': (contactPerson == null || contactPerson.trim().isEmpty) ? null : contactPerson.trim(),
-      'office_phone': (officePhone == null || officePhone.trim().isEmpty) ? null : officePhone.trim(),
-      'office_email': (officeEmail == null || officeEmail.trim().isEmpty) ? null : officeEmail.trim(),
+      'unit_number': (unitNumber == null || unitNumber.trim().isEmpty)
+          ? null
+          : unitNumber.trim(),
+      'id_number': (idNumber == null || idNumber.trim().isEmpty)
+          ? null
+          : idNumber.trim(),
+      'manager_type': (managerType == null || managerType.trim().isEmpty)
+          ? null
+          : managerType.trim(),
+      'company_name': (companyName == null || companyName.trim().isEmpty)
+          ? null
+          : companyName.trim(),
+      'contact_person': (contactPerson == null || contactPerson.trim().isEmpty)
+          ? null
+          : contactPerson.trim(),
+      'office_phone': (officePhone == null || officePhone.trim().isEmpty)
+          ? null
+          : officePhone.trim(),
+      'office_email': (officeEmail == null || officeEmail.trim().isEmpty)
+          ? null
+          : officeEmail.trim(),
     }..removeWhere((_, v) => v == null);
 
     print('➡️ Sending to: $url');
@@ -151,6 +166,152 @@ class AuthService {
     } else {
       print('❌ Login failed: ${response.statusCode} ${response.body}');
       throw Exception('Login failed: ${response.body}');
+    }
+  }
+
+  /// =============================
+  /// REQUEST PASSWORD RESET OTP
+  /// =============================
+  static Future<Map<String, dynamic>> requestPasswordReset({
+    required String role,
+    required String email,
+  }) async {
+    final url = Uri.parse('${AppConfig.apiBaseUrl}/auth/request-password-reset');
+
+    final payload = <String, dynamic>{
+      'role': role.trim().toLowerCase(),
+      'email': email.trim().toLowerCase(),
+    };
+
+    print('➡️ Request password reset: $payload');
+
+    final response = await http.post(
+      url,
+      headers: const {
+        'Content-Type': 'application/json',
+        'ngrok-skip-browser-warning': 'true',
+      },
+      body: jsonEncode(payload),
+    );
+
+    print('⬅️ Response: ${response.statusCode} ${response.body}');
+
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body);
+      return (data is Map) ? data.cast<String, dynamic>() : <String, dynamic>{};
+    } else {
+      throw Exception('Failed to request password reset: ${response.body}');
+    }
+  }
+
+  /// =============================
+  /// VERIFY RESET OTP
+  /// =============================
+  static Future<Map<String, dynamic>> verifyResetOtp({
+    required String role,
+    required String email,
+    required String otpCode,
+  }) async {
+    final url = Uri.parse('${AppConfig.apiBaseUrl}/auth/verify-reset-otp');
+
+    final payload = <String, dynamic>{
+      'role': role.trim().toLowerCase(),
+      'email': email.trim().toLowerCase(),
+      'otp_code': otpCode.trim(),
+    };
+
+    print('➡️ Verify OTP: $payload');
+
+    final response = await http.post(
+      url,
+      headers: const {
+        'Content-Type': 'application/json',
+        'ngrok-skip-browser-warning': 'true',
+      },
+      body: jsonEncode(payload),
+    );
+
+    print('⬅️ Response: ${response.statusCode} ${response.body}');
+
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body);
+      return (data is Map) ? data.cast<String, dynamic>() : <String, dynamic>{};
+    } else {
+      throw Exception('Failed to verify OTP: ${response.body}');
+    }
+  }
+
+  /// =============================
+  /// RESET PASSWORD
+  /// =============================
+  static Future<Map<String, dynamic>> resetPassword({
+    required String role,
+    required String email,
+    required String otpCode,
+    required String newPassword,
+  }) async {
+    final url = Uri.parse('${AppConfig.apiBaseUrl}/auth/reset-password');
+
+    final payload = <String, dynamic>{
+      'role': role.trim().toLowerCase(),
+      'email': email.trim().toLowerCase(),
+      'otp_code': otpCode.trim(),
+      'new_password': newPassword.trim(),
+    };
+
+    print('➡️ Reset password: $payload');
+
+    final response = await http.post(
+      url,
+      headers: const {
+        'Content-Type': 'application/json',
+        'ngrok-skip-browser-warning': 'true',
+      },
+      body: jsonEncode(payload),
+    );
+
+    print('⬅️ Response: ${response.statusCode} ${response.body}');
+
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body);
+      return (data is Map) ? data.cast<String, dynamic>() : <String, dynamic>{};
+    } else {
+      throw Exception('Failed to reset password: ${response.body}');
+    }
+  }
+
+  /// =============================
+  /// RESEND RESET OTP
+  /// =============================
+  static Future<Map<String, dynamic>> resendResetOtp({
+    required String role,
+    required String email,
+  }) async {
+    final url = Uri.parse('${AppConfig.apiBaseUrl}/auth/resend-reset-otp');
+
+    final payload = <String, dynamic>{
+      'role': role.trim().toLowerCase(),
+      'email': email.trim().toLowerCase(),
+    };
+
+    print('➡️ Resend OTP: $payload');
+
+    final response = await http.post(
+      url,
+      headers: const {
+        'Content-Type': 'application/json',
+        'ngrok-skip-browser-warning': 'true',
+      },
+      body: jsonEncode(payload),
+    );
+
+    print('⬅️ Response: ${response.statusCode} ${response.body}');
+
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body);
+      return (data is Map) ? data.cast<String, dynamic>() : <String, dynamic>{};
+    } else {
+      throw Exception('Failed to resend OTP: ${response.body}');
     }
   }
 

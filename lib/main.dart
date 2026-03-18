@@ -34,7 +34,8 @@ import 'package:property_manager_frontend/screens/admin/admin_logs.dart';
 import 'package:property_manager_frontend/screens/admin/admin_landlords.dart';
 import 'package:property_manager_frontend/screens/admin/admin_managers.dart';
 import 'package:property_manager_frontend/screens/admin/admin_payouts.dart';
-
+import 'package:property_manager_frontend/screens/auth/forgot_password_screen.dart';
+import 'package:property_manager_frontend/screens/auth/reset_password_screen.dart';
 // Super admin screens
 import 'package:property_manager_frontend/screens/super_admin/super_admin_home.dart';
 import 'package:property_manager_frontend/screens/super_admin/super_admin_admins.dart';
@@ -165,6 +166,8 @@ class PropSmartApp extends StatelessWidget {
         '/admin_landlords': (_) => const AdminLandlordsScreen(),
         '/admin_managers': (_) => const AdminManagersScreen(),
         '/admin_payouts': (_) => const AdminPayoutsScreen(),
+        '/forgot_password': (context) => const ForgotPasswordScreen(),
+        '/reset_password': (context) => const ResetPasswordScreen(),
         '/admin_property_detail': (_) => const Scaffold(
               body: Center(child: Text('Admin property detail coming soon')),
             ),
