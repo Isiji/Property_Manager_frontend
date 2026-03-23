@@ -72,13 +72,18 @@ class PaymentService {
     required String period,
   }) async {
     final headers = await TokenManager.authHeaders();
-    final url = Uri.parse('${AppConfig.apiBaseUrl}/reports/property/$propertyId/status?period=$period');
+    final url = Uri.parse(
+      '${AppConfig.apiBaseUrl}/reports/property/$propertyId/status?period=$period',
+    );
 
     print('[PaymentService] GET $url');
-    final res = await http.get(url, headers: {
-      'Content-Type': 'application/json',
-      ...headers,
-    });
+    final res = await http.get(
+      url,
+      headers: {
+        'Content-Type': 'application/json',
+        ...headers,
+      },
+    );
 
     print('[PaymentService] ← ${res.statusCode} ${res.body}');
     return _decodeMapOrEmpty(res);
@@ -87,33 +92,27 @@ class PaymentService {
   // -----------------------------
   // Record Cash / Manual Payment
   // -----------------------------
-  /// ✅ Now matches your UI calls:
-  /// recordPayment(... period: ..., paidDate: ...)
   static Future<Map<String, dynamic>> recordPayment({
     required int leaseId,
     required num amount,
     String method = 'cash',
     String? reference,
     String? notes,
-
-    // your UI might call either of these:
-    String? paidDate,  // ✅ NEW (matches landlord_property_units.dart)
-    String? paidAtIso, // still supported
-
+    String? paidDate,
+    String? paidAtIso,
     String? period,
   }) async {
     final headers = await TokenManager.authHeaders();
     final url = Uri.parse('${AppConfig.apiBaseUrl}/payments/record');
 
-    // Prefer paidDate if provided, else paidAtIso
     final payload = {
       'lease_id': leaseId,
       'amount': amount.toDouble(),
       'method': method,
       'reference': reference,
       'notes': notes,
-      'paid_date': paidDate, // ✅ if backend expects date-only
-      'paid_at': paidDate == null ? paidAtIso : null, // avoid sending both
+      'paid_date': paidDate,
+      'paid_at': paidDate == null ? paidAtIso : null,
       'period': period,
     }..removeWhere((k, v) => v == null);
 
@@ -153,7 +152,9 @@ class PaymentService {
     );
 
     print('[PaymentService] ← ${res.statusCode} ${res.body}');
-    if (res.statusCode != 200 && res.statusCode != 201 && res.statusCode != 204) {
+    if (res.statusCode != 200 &&
+        res.statusCode != 201 &&
+        res.statusCode != 204) {
       throw Exception('Failed to send reminder: ${_errMsg(res)}');
     }
   }
@@ -180,7 +181,9 @@ class PaymentService {
     );
 
     print('[PaymentService] ← ${res.statusCode} ${res.body}');
-    if (res.statusCode != 200 && res.statusCode != 201 && res.statusCode != 204) {
+    if (res.statusCode != 200 &&
+        res.statusCode != 201 &&
+        res.statusCode != 204) {
       throw Exception('Failed to send bulk reminders: ${_errMsg(res)}');
     }
   }
@@ -188,19 +191,27 @@ class PaymentService {
   // -----------------------------
   // Receipt PDF
   // -----------------------------
-  static Future<Uint8List> downloadReceiptPdf(int id) async {
+  static Future<Uint8List> downloadReceiptPdf(int paymentId) async {
     final headers = await TokenManager.authHeaders();
-    final url = Uri.parse('${AppConfig.apiBaseUrl}/payments/receipt/$id/pdf');
+    final url = Uri.parse(
+      '${AppConfig.apiBaseUrl}/payments/receipt/$paymentId/pdf',
+    );
 
     print('[PaymentService] GET $url');
-    final res = await http.get(url, headers: {
-      ...headers,
-    });
+    final res = await http.get(
+      url,
+      headers: {...headers},
+    );
 
     print('[PaymentService] ← ${res.statusCode}');
     if (res.statusCode == 200) {
       return res.bodyBytes;
     }
+
+    try {
+      print('[PaymentService] body: ${res.body}');
+    } catch (_) {}
+
     throw Exception('Failed to download receipt PDF: ${_errMsg(res)}');
   }
 }

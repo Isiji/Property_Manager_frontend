@@ -1,14 +1,10 @@
-// lib/screens/tenant/tenant_home.dart
-
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:property_manager_frontend/services/tenant_portal_service.dart';
 import 'package:property_manager_frontend/services/tenant_service.dart';
 import 'package:property_manager_frontend/services/payment_service.dart';
 import 'package:property_manager_frontend/utils/token_manager.dart';
-import 'package:property_manager_frontend/services/auth_service.dart';
 import 'package:property_manager_frontend/services/lease_service.dart';
-import 'package:property_manager_frontend/widgets/notification_bell.dart';
 
 class TenantHome extends StatefulWidget {
   const TenantHome({super.key});
@@ -17,7 +13,8 @@ class TenantHome extends StatefulWidget {
   State<TenantHome> createState() => _TenantHomeState();
 }
 
-class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateMixin {
+class _TenantHomeState extends State<TenantHome>
+    with SingleTickerProviderStateMixin {
   late final TabController _tab;
   bool _loading = true;
 
@@ -48,34 +45,25 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
     super.dispose();
   }
 
-  Future<void> _logout() async {
-    try {
-      await AuthService.logout();
-    } catch (_) {}
-    if (!mounted) return;
-    Navigator.of(context).pushNamedAndRemoveUntil('/login', (_) => false);
-  }
-
   Future<void> _loadAll() async {
     try {
-      setState(() => _loading = true);
+      if (mounted) setState(() => _loading = true);
 
       final role = await TokenManager.currentRole();
       if (role != 'tenant') {
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please log in as a tenant.')));
-        Navigator.of(context).pushNamedAndRemoveUntil('/login', (_) => false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Please log in as a tenant.')),
+        );
         return;
       }
 
       try {
         final dash = await TenantPortalService.getOverview();
-        _dashboard = (dash is Map) ? dash.cast<String, dynamic>() : <String, dynamic>{};
+        _dashboard =
+            (dash is Map) ? dash.cast<String, dynamic>() : <String, dynamic>{};
       } catch (e) {
         _dashboard = const <String, dynamic>{};
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Overview unavailable: $e')));
-        }
       }
 
       try {
@@ -101,7 +89,10 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
 
       try {
         final profile = await TenantPortalService.getProfile();
-        final p = (profile is Map) ? profile.cast<String, dynamic>() : <String, dynamic>{};
+        final p = (profile is Map)
+            ? profile.cast<String, dynamic>()
+            : <String, dynamic>{};
+
         _nameCtrl.text = (p['name'] ?? '').toString();
         _phoneCtrl.text = (p['phone'] ?? '').toString();
         _emailCtrl.text = (p['email'] ?? '').toString();
@@ -133,25 +124,35 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
                 hintText: 'e.g. broken kitchen pipe',
               ),
               maxLines: 4,
-              validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
+              validator: (v) =>
+                  (v == null || v.trim().isEmpty) ? 'Required' : null,
             ),
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
           FilledButton(
             onPressed: () async {
               if (!formKey.currentState!.validate()) return;
               try {
-                await TenantPortalService.createMaintenance(description: descCtrl.text.trim());
+                await TenantPortalService.createMaintenance(
+                  description: descCtrl.text.trim(),
+                );
                 if (!mounted) return;
                 Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Request submitted')));
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Request submitted')),
+                );
                 final m = await TenantPortalService.getMaintenance();
                 setState(() => _tickets = m);
               } catch (e) {
                 if (!mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Submit failed: $e')));
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Submit failed: $e')),
+                );
               }
             },
             child: const Text('Submit'),
@@ -175,12 +176,22 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
       );
 
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Profile updated')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Profile updated')),
+      );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Update failed: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Update failed: $e')),
+      );
     }
   }
+
+  Map<String, dynamic> _asMap(dynamic v) =>
+      v is Map ? v.cast<String, dynamic>() : <String, dynamic>{};
+
+  bool _isTrue(dynamic v) =>
+      v == true || v?.toString().toLowerCase() == 'true';
 
   @override
   Widget build(BuildContext context) {
@@ -188,54 +199,101 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
     final now = DateTime.now();
     final ym = DateFormat.yMMMM().format(DateTime(now.year, now.month, 1));
 
-    return Scaffold(
-      appBar: AppBar(
-        title: Text('Tenant • $ym'),
-        bottom: TabBar(
-          controller: _tab,
-          tabs: const [
-            Tab(text: 'Dashboard', icon: Icon(Icons.dashboard_customize_rounded)),
-            Tab(text: 'Payments',  icon: Icon(Icons.receipt_long_rounded)),
-            Tab(text: 'Maintenance', icon: Icon(Icons.build_rounded)),
-            Tab(text: 'Profile', icon: Icon(Icons.person_rounded)),
-          ],
-        ),
-        actions: [
-          const NotificationBell(), // 🔔 unread badge + inbox
-          const SizedBox(width: 4),
-          const VerticalDivider(width: 1, thickness: 1),
-          IconButton(
-            tooltip: 'Logout',
-            icon: const Icon(Icons.logout_rounded),
-            onPressed: _logout,
+    if (_loading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    return Column(
+      children: [
+        Container(
+          margin: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+          padding: const EdgeInsets.all(6),
+          decoration: BoxDecoration(
+            color: const Color(0xFF0F172A),
+            borderRadius: BorderRadius.circular(14),
           ),
-          const SizedBox(width: 8),
-        ],
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _loadAll,
-        icon: const Icon(Icons.refresh_rounded),
-        label: const Text('Refresh'),
-      ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : TabBarView(
-              controller: _tab,
-              children: [
-                _dashboardTab(context, t),
-                _paymentsTab(context, t),
-                _maintenanceTab(context, t),
-                _profileTab(context, t),
-              ],
+          child: TabBar(
+            controller: _tab,
+            isScrollable: false,
+            labelColor: Colors.white,
+            unselectedLabelColor: Colors.white70,
+            dividerColor: Colors.transparent,
+            indicator: BoxDecoration(
+              color: const Color(0xFF1E88E5),
+              borderRadius: BorderRadius.circular(10),
             ),
+            labelStyle: const TextStyle(
+              fontWeight: FontWeight.w600,
+              fontSize: 13,
+            ),
+            unselectedLabelStyle: const TextStyle(
+              fontWeight: FontWeight.w500,
+              fontSize: 13,
+            ),
+            tabs: const [
+              Tab(
+                text: 'Dashboard',
+                icon: Icon(Icons.dashboard_customize_rounded, size: 18),
+              ),
+              Tab(
+                text: 'Payments',
+                icon: Icon(Icons.receipt_long_rounded, size: 18),
+              ),
+              Tab(
+                text: 'Maintenance',
+                icon: Icon(Icons.build_rounded, size: 18),
+              ),
+              Tab(
+                text: 'Profile',
+                icon: Icon(Icons.person_rounded, size: 18),
+              ),
+            ],
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Tenant • $ym',
+                  style: const TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w800,
+                    color: Color(0xFF0F172A),
+                  ),
+                ),
+              ),
+              FilledButton.icon(
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF1E88E5),
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                onPressed: _loadAll,
+                icon: const Icon(Icons.refresh_rounded),
+                label: const Text('Refresh'),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 8),
+        Expanded(
+          child: TabBarView(
+            controller: _tab,
+            children: [
+              _dashboardTab(context, t),
+              _paymentsTab(context, t),
+              _maintenanceTab(context, t),
+              _profileTab(context, t),
+            ],
+          ),
+        ),
+      ],
     );
   }
-
-  // ---------- helpers ----------
-  Map<String, dynamic> _asMap(dynamic v) => v is Map ? v.cast<String, dynamic>() : <String, dynamic>{};
-  bool _isTrue(dynamic v) => v == true || v?.toString().toLowerCase() == 'true';
-
-  // ---------- tabs ----------
 
   Widget _dashboardTab(BuildContext context, ThemeData t) {
     final d = _asMap(_dashboard);
@@ -252,148 +310,232 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
     final received = (status['received'] ?? 0).toString();
     final balance = (status['balance'] ?? 0).toString();
 
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        if (paid)
+    return RefreshIndicator(
+      onRefresh: _loadAll,
+      child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(16),
+        children: [
+          if (paid)
+            Container(
+              padding: const EdgeInsets.all(14),
+              margin: const EdgeInsets.only(bottom: 12),
+              decoration: BoxDecoration(
+                color: t.colorScheme.tertiaryContainer,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: t.dividerColor.withOpacity(.2)),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.check_circle_rounded,
+                    color: t.colorScheme.onTertiaryContainer,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Thanks! Your rent for this month is received.',
+                      style: t.textTheme.bodyMedium?.copyWith(
+                        color: t.colorScheme.onTertiaryContainer,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           Container(
-            padding: const EdgeInsets.all(14),
-            margin: const EdgeInsets.only(bottom: 12),
+            padding: const EdgeInsets.all(18),
             decoration: BoxDecoration(
-              color: t.colorScheme.tertiaryContainer,
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: t.dividerColor.withOpacity(.2)),
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: t.dividerColor.withOpacity(.20)),
+              boxShadow: [
+                BoxShadow(
+                  blurRadius: 18,
+                  color: Colors.black.withOpacity(.04),
+                  offset: const Offset(0, 4),
+                ),
+              ],
             ),
             child: Row(
               children: [
-                Icon(Icons.check_circle_rounded, color: t.colorScheme.onTertiaryContainer),
-                const SizedBox(width: 10),
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE0F2FE),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: const Icon(
+                    Icons.apartment_rounded,
+                    size: 30,
+                    color: Color(0xFF1E88E5),
+                  ),
+                ),
+                const SizedBox(width: 12),
                 Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        propertyName.isEmpty ? 'Your Unit' : propertyName,
+                        style: t.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Unit $unitLabel • Rent: $rent',
+                        style: t.textTheme.bodyMedium?.copyWith(
+                          color: const Color.fromARGB(145, 0, 10, 18),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: paid
+                        ? t.colorScheme.tertiaryContainer
+                        : t.colorScheme.errorContainer,
+                    borderRadius: BorderRadius.circular(999),
+                  ),
                   child: Text(
-                    'Thanks! Your rent for this month is received. 🙌',
-                    style: t.textTheme.bodyMedium?.copyWith(
-                      color: t.colorScheme.onTertiaryContainer,
-                      fontWeight: FontWeight.w700,
+                    paid ? 'Paid' : 'Unpaid',
+                    style: t.textTheme.labelMedium?.copyWith(
+                      color: paid
+                          ? t.colorScheme.onTertiaryContainer
+                          : t.colorScheme.onErrorContainer,
+                      fontWeight: FontWeight.w800,
                     ),
                   ),
                 ),
               ],
             ),
           ),
-
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: t.colorScheme.surface,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: t.dividerColor.withOpacity(.25)),
-          ),
-          child: Row(
+          const SizedBox(height: 16),
+          Wrap(
+            spacing: 12,
+            runSpacing: 12,
             children: [
-              Icon(Icons.apartment_rounded, size: 36, color: t.colorScheme.primary),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(propertyName.isEmpty ? 'Your Unit' : propertyName,
-                        style: t.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
-                    const SizedBox(height: 6),
-                    Text('Unit $unitLabel • Rent: $rent'),
-                  ],
-                ),
+              _kpi(
+                t,
+                Icons.request_quote_rounded,
+                'Expected',
+                expected,
+                t.colorScheme.primaryContainer,
+                t.colorScheme.onPrimaryContainer,
               ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                decoration: BoxDecoration(
-                  color: paid ? t.colorScheme.tertiaryContainer : t.colorScheme.errorContainer,
-                  borderRadius: BorderRadius.circular(999),
-                ),
-                child: Text(
-                  paid ? 'Paid' : 'Unpaid',
-                  style: t.textTheme.labelMedium?.copyWith(
-                    color: paid ? t.colorScheme.onTertiaryContainer : t.colorScheme.onErrorContainer,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
+              _kpi(
+                t,
+                Icons.payments_rounded,
+                'Received',
+                received,
+                t.colorScheme.secondaryContainer,
+                t.colorScheme.onSecondaryContainer,
+              ),
+              _kpi(
+                t,
+                Icons.account_balance_wallet_rounded,
+                'Balance',
+                balance,
+                t.colorScheme.tertiaryContainer,
+                t.colorScheme.onTertiaryContainer,
               ),
             ],
           ),
-        ),
+          const SizedBox(height: 18),
+          Row(
+            children: [
+              FilledButton.icon(
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF1E88E5),
+                  foregroundColor: Colors.white,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                onPressed: () async {
+                  try {
+                    final d = _asMap(_dashboard);
+                    final lease = _asMap(d['lease']);
+                    final status = _asMap(d['this_month']);
+                    final leaseId = (lease['id'] as num?)?.toInt();
+                    final expected = (status['expected'] as num?) ?? 0;
 
-        const SizedBox(height: 16),
+                    if (leaseId == null || expected <= 0) {
+                      if (!mounted) return;
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('No active lease or invalid amount'),
+                        ),
+                      );
+                      return;
+                    }
 
-        Wrap(
-          spacing: 12,
-          runSpacing: 12,
-          children: [
-            _kpi(t, Icons.request_quote_rounded, 'Expected', expected,
-                t.colorScheme.primaryContainer, t.colorScheme.onPrimaryContainer),
-            _kpi(t, Icons.payments_rounded, 'Received', received,
-                t.colorScheme.secondaryContainer, t.colorScheme.onSecondaryContainer),
-            _kpi(t, Icons.account_balance_wallet_rounded, 'Balance', balance,
-                t.colorScheme.tertiaryContainer, t.colorScheme.onTertiaryContainer),
-          ],
-        ),
+                    final res = await PaymentService.initiateMpesa(
+                      leaseId: leaseId,
+                      amount: expected,
+                    );
 
-        const SizedBox(height: 16),
-
-        Row(
-          children: [
-            FilledButton.icon(
-              onPressed: () async {
-                try {
-                  final d = _asMap(_dashboard);
-                  final lease = _asMap(d['lease']);
-                  final status = _asMap(d['this_month']);
-                  final leaseId = (lease['id'] as num?)?.toInt();
-                  final expected = (status['expected'] as num?) ?? 0;
-
-                  if (leaseId == null || expected <= 0) {
                     if (!mounted) return;
                     ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('No active lease or invalid amount')),
+                      SnackBar(
+                        content: Text(
+                          'STK sent. Ref: ${res['checkout_id'] ?? '—'}',
+                        ),
+                      ),
                     );
-                    return;
+
+                    await _loadAll();
+                  } catch (e) {
+                    if (!mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Payment start failed: $e')),
+                    );
                   }
-
-                  final res = await PaymentService.initiateMpesa(
-                    leaseId: leaseId,
-                    amount: expected,
-                  );
-
-                  if (!mounted) return;
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('STK sent. Ref: ${res['checkout_id'] ?? '—'}')),
-                  );
-
-                  await _loadAll();
-                } catch (e) {
-                  if (!mounted) return;
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Payment start failed: $e')),
-                  );
-                }
-              },
-              icon: const Icon(Icons.credit_card_rounded),
-              label: const Text('Pay Now'),
-            ),
-            const SizedBox(width: 8),
-            OutlinedButton.icon(
-              onPressed: _submitMaintenance,
-              icon: const Icon(Icons.build_rounded),
-              label: const Text('Maintenance'),
-            ),
-          ],
-        ),
-      ],
+                },
+                icon: const Icon(Icons.credit_card_rounded),
+                label: const Text('Pay Now'),
+              ),
+              const SizedBox(width: 8),
+              OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                onPressed: _submitMaintenance,
+                icon: const Icon(Icons.build_rounded),
+                label: const Text('Maintenance'),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 
-  Widget _kpi(ThemeData t, IconData icon, String label, String value, Color bg, Color fg) {
+  Widget _kpi(
+    ThemeData t,
+    IconData icon,
+    String label,
+    String value,
+    Color bg,
+    Color fg,
+  ) {
     return Container(
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(16)),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(16),
+      ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -404,7 +546,14 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
             children: [
               Text(label, style: TextStyle(color: fg.withOpacity(.9))),
               const SizedBox(height: 4),
-              Text(value, style: TextStyle(color: fg, fontWeight: FontWeight.w800, fontSize: 18)),
+              Text(
+                value,
+                style: TextStyle(
+                  color: fg,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 18,
+                ),
+              ),
             ],
           ),
         ],
@@ -417,21 +566,30 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
       return Center(
         child: Container(
           padding: const EdgeInsets.all(24),
+          margin: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: t.colorScheme.surface,
+            color: Colors.white,
             borderRadius: BorderRadius.circular(16),
             border: Border.all(color: t.dividerColor.withOpacity(.25)),
           ),
-          child: const Text('No payments yet — they will appear here once you start paying rent.'),
+          child: const Text(
+            'No payments yet — they will appear here once you start paying rent.',
+          ),
         ),
       );
     }
 
     final items = List<Map<String, dynamic>>.from(
-      _payments.map((e) => (e is Map) ? e.cast<String, dynamic>() : <String, dynamic>{}),
+      _payments.map(
+        (e) => (e is Map) ? e.cast<String, dynamic>() : <String, dynamic>{},
+      ),
     )..sort((a, b) {
-        final aCreated = DateTime.tryParse((a['created_at'] ?? '').toString()) ?? DateTime(1970);
-        final bCreated = DateTime.tryParse((b['created_at'] ?? '').toString()) ?? DateTime(1970);
+        final aCreated =
+            DateTime.tryParse((a['created_at'] ?? '').toString()) ??
+                DateTime(1970);
+        final bCreated =
+            DateTime.tryParse((b['created_at'] ?? '').toString()) ??
+                DateTime(1970);
         return bCreated.compareTo(aCreated);
       });
 
@@ -444,7 +602,7 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
         separatorBuilder: (_, __) => const SizedBox(height: 10),
         itemBuilder: (_, i) {
           final p = items[i];
-          final period = (p['period'] ?? '').toString(); // YYYY-MM
+          final period = (p['period'] ?? '').toString();
           final amount = (p['amount'] ?? '').toString();
           final date = (p['paid_date'] ?? '').toString();
           final ref = (p['reference'] ?? '').toString();
@@ -452,8 +610,12 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
           final id = (p['id'] as num?)?.toInt();
 
           final isPaid = status == 'paid';
-          final statusBg = isPaid ? t.colorScheme.tertiaryContainer : t.colorScheme.errorContainer;
-          final statusFg = isPaid ? t.colorScheme.onTertiaryContainer : t.colorScheme.onErrorContainer;
+          final statusBg = isPaid
+              ? t.colorScheme.tertiaryContainer
+              : t.colorScheme.errorContainer;
+          final statusFg = isPaid
+              ? t.colorScheme.onTertiaryContainer
+              : t.colorScheme.onErrorContainer;
 
           String prettyMonth(String yyyymm) {
             try {
@@ -468,22 +630,32 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
           return Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: t.colorScheme.surface,
+              color: Colors.white,
               borderRadius: BorderRadius.circular(16),
               border: Border.all(color: t.dividerColor.withOpacity(.25)),
               boxShadow: [
                 BoxShadow(
                   blurRadius: 12,
-                  spreadRadius: 0,
                   offset: const Offset(0, 2),
                   color: t.shadowColor.withOpacity(.06),
-                )
+                ),
               ],
             ),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Icon(Icons.receipt_long_rounded, size: 28),
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE0F2FE),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(
+                    Icons.receipt_long_rounded,
+                    size: 24,
+                    color: Color(0xFF1E88E5),
+                  ),
+                ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
@@ -494,13 +666,21 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
                           Expanded(
                             child: Text(
                               'KSh $amount • ${prettyMonth(period)}',
-                              style: t.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
+                              style: t.textTheme.titleSmall?.copyWith(
+                                fontWeight: FontWeight.w800,
+                              ),
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                            decoration: BoxDecoration(color: statusBg, borderRadius: BorderRadius.circular(999)),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 6,
+                            ),
+                            decoration: BoxDecoration(
+                              color: statusBg,
+                              borderRadius: BorderRadius.circular(999),
+                            ),
                             child: Text(
                               isPaid ? 'PAID' : 'PENDING',
                               style: t.textTheme.labelSmall?.copyWith(
@@ -517,8 +697,16 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
                         spacing: 12,
                         runSpacing: 4,
                         children: [
-                          _meta(t, Icons.event_available_rounded, date.isEmpty ? '—' : date),
-                          _meta(t, Icons.numbers_rounded, ref.isEmpty ? '—' : ref),
+                          _meta(
+                            t,
+                            Icons.event_available_rounded,
+                            date.isEmpty ? '—' : date,
+                          ),
+                          _meta(
+                            t,
+                            Icons.numbers_rounded,
+                            ref.isEmpty ? '—' : ref,
+                          ),
                           _meta(t, Icons.tag_rounded, 'Period: $period'),
                         ],
                       ),
@@ -533,29 +721,43 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
                         ),
                       ],
                       const SizedBox(height: 12),
-                      Row(
-                        children: [
-                          if (isPaid && id != null)
-                            OutlinedButton.icon(
-                              onPressed: () async {
-                                try {
-                                  await PaymentService.downloadReceiptPdf(id);
-                                  if (!mounted) return;
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(content: Text('Receipt download started')),
-                                  );
-                                } catch (e) {
-                                  if (!mounted) return;
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(content: Text('Download failed: $e')),
-                                  );
-                                }
-                              },
-                              icon: const Icon(Icons.download_rounded),
-                              label: const Text('Receipt (PDF)'),
+                      if (isPaid && id != null)
+                        OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 12,
                             ),
-                        ],
-                      ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                          onPressed: () async {
+                            try {
+                              final bytes =
+                                  await PaymentService.downloadReceiptPdf(id);
+                              if (!mounted) return;
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    'Receipt downloaded: ${bytes.length} bytes',
+                                  ),
+                                ),
+                              );
+                            } catch (e) {
+                              if (!mounted) return;
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    'Receipt download failed: $e',
+                                  ),
+                                ),
+                              );
+                            }
+                          },
+                          icon: const Icon(Icons.download_rounded),
+                          label: const Text('Receipt (PDF)'),
+                        ),
                     ],
                   ),
                 ),
@@ -579,7 +781,12 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
         children: [
           Icon(icon, size: 16, color: t.colorScheme.onSurfaceVariant),
           const SizedBox(width: 6),
-          Text(text, style: t.textTheme.labelSmall?.copyWith(color: t.colorScheme.onSurfaceVariant)),
+          Text(
+            text,
+            style: t.textTheme.labelSmall?.copyWith(
+              color: t.colorScheme.onSurfaceVariant,
+            ),
+          ),
         ],
       ),
     );
@@ -592,6 +799,14 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
         Align(
           alignment: Alignment.centerLeft,
           child: FilledButton.icon(
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFF1E88E5),
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
             onPressed: _submitMaintenance,
             icon: const Icon(Icons.add_rounded),
             label: const Text('New Request'),
@@ -602,7 +817,7 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
           Container(
             padding: const EdgeInsets.all(24),
             decoration: BoxDecoration(
-              color: t.colorScheme.surface,
+              color: Colors.white,
               borderRadius: BorderRadius.circular(16),
               border: Border.all(color: t.dividerColor.withOpacity(.25)),
             ),
@@ -611,19 +826,23 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
         else
           Card(
             elevation: 0,
-            color: t.colorScheme.surface,
+            color: Colors.white,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(16),
               side: BorderSide(color: t.dividerColor.withOpacity(.25)),
             ),
             child: Column(
               children: _tickets.map<Widget>((it) {
-                final m = (it is Map) ? it.cast<String, dynamic>() : <String, dynamic>{};
-                final description = (m['description'] ?? 'Maintenance request').toString();
+                final m =
+                    (it is Map) ? it.cast<String, dynamic>() : <String, dynamic>{};
+                final description =
+                    (m['description'] ?? 'Maintenance request').toString();
                 final status = (m['status'] ?? 'open').toString();
                 final created = (m['created_at'] ?? '').toString();
+
                 final chip = Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                   decoration: BoxDecoration(
                     color: status == 'resolved' || status == 'closed'
                         ? t.colorScheme.tertiaryContainer
@@ -640,9 +859,14 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
                     ),
                   ),
                 );
+
                 return ListTile(
                   leading: const Icon(Icons.build_rounded),
-                  title: Text(description, maxLines: 2, overflow: TextOverflow.ellipsis),
+                  title: Text(
+                    description,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                   subtitle: Text(created),
                   trailing: chip,
                 );
@@ -655,49 +879,93 @@ class _TenantHomeState extends State<TenantHome> with SingleTickerProviderStateM
 
   Widget _profileTab(BuildContext context, ThemeData t) {
     final formKey = GlobalKey<FormState>();
+
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        Text('Your Profile', style: t.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
+        Text(
+          'Your Profile',
+          style: t.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+        ),
         const SizedBox(height: 12),
-        Form(
-          key: formKey,
-          child: Column(
-            children: [
-              TextFormField(
-                controller: _nameCtrl,
-                decoration: const InputDecoration(labelText: 'Full Name', prefixIcon: Icon(Icons.person)),
-                validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _phoneCtrl,
-                decoration: const InputDecoration(labelText: 'Phone', prefixIcon: Icon(Icons.phone)),
-                validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _emailCtrl,
-                decoration: const InputDecoration(labelText: 'Email (optional)', prefixIcon: Icon(Icons.email)),
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _idCtrl,
-                decoration: const InputDecoration(labelText: 'National ID (optional)', prefixIcon: Icon(Icons.badge)),
-              ),
-              const SizedBox(height: 16),
-              Align(
-                alignment: Alignment.centerRight,
-                child: FilledButton.icon(
-                  onPressed: () {
-                    if (!formKey.currentState!.validate()) return;
-                    _saveProfile();
-                  },
-                  icon: const Icon(Icons.save_rounded),
-                  label: const Text('Save'),
-                ),
+        Container(
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: t.dividerColor.withOpacity(.20)),
+            boxShadow: [
+              BoxShadow(
+                blurRadius: 18,
+                color: const Color.fromARGB(255, 115, 129, 172).withOpacity(.04),
+                offset: const Offset(0, 4),
               ),
             ],
+          ),
+          child: Form(
+            key: formKey,
+            child: Column(
+              children: [
+                TextFormField(
+                  controller: _nameCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Full Name',
+                    prefixIcon: Icon(Icons.person),
+                  ),
+                  validator: (v) =>
+                      (v == null || v.trim().isEmpty) ? 'Required' : null,
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _phoneCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Phone',
+                    prefixIcon: Icon(Icons.phone),
+                  ),
+                  validator: (v) =>
+                      (v == null || v.trim().isEmpty) ? 'Required' : null,
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _emailCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Email (optional)',
+                    prefixIcon: Icon(Icons.email),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _idCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'National ID (optional)',
+                    prefixIcon: Icon(Icons.badge),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: FilledButton.icon(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFF1E88E5),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 14,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    onPressed: () {
+                      if (!formKey.currentState!.validate()) return;
+                      _saveProfile();
+                    },
+                    icon: const Icon(Icons.save_rounded),
+                    label: const Text('Save'),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ],
