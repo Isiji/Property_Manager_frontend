@@ -27,10 +27,10 @@ class TenantDto {
   final String? idNumber;
   final int propertyId;
   final int unitId;
-  final String? propertyName;   // optional enrichment from backend
-  final String? unitLabel;      // aka house / number
-  final String? rentStatus;     // "paid" | "partial" | "overdue" | ...
-  final double? currentBalance; // +ve = owes, -ve = credit
+  final String? propertyName;
+  final String? unitLabel;
+  final String? rentStatus;
+  final double? currentBalance;
 
   TenantDto({
     required this.id,
@@ -62,8 +62,6 @@ class TenantDto {
 }
 
 class TenantService {
-  // ---- URL + headers helpers -------------------------------------------------
-
   static Uri _u(String path, [Map<String, String>? q]) {
     final base = AppConfig.apiBaseUrl.endsWith('/')
         ? AppConfig.apiBaseUrl.substring(0, AppConfig.apiBaseUrl.length - 1)
@@ -76,8 +74,6 @@ class TenantService {
         'Content-Type': 'application/json',
         ...await TokenManager.authHeaders(),
       };
-
-  // ---- CREATE ---------------------------------------------------------------
 
   static Future<Map<String, dynamic>> createTenant({
     required String name,
@@ -92,65 +88,76 @@ class TenantService {
     final headers = await _jsonHeaders();
 
     final payload = <String, dynamic>{
-      'name': name,
-      'phone': phone,
-      'email': email,           // nullable
-      'password': password,     // nullable
+      'name': name.trim(),
+      'phone': phone.trim(),
+      'email': (email == null || email.trim().isEmpty) ? null : email.trim(),
+      'password': (password == null || password.trim().isEmpty) ? null : password.trim(),
       'property_id': propertyId,
       'unit_id': unitId,
-      'id_number': idNumber,
+      'id_number': (idNumber == null || idNumber.trim().isEmpty) ? null : idNumber.trim(),
     }..removeWhere((_, v) => v == null);
 
     print('[TenantService] POST $url');
-    final res = await http.post(url, headers: headers, body: jsonEncode(payload));
+    print('[TenantService] payload=$payload');
+
+    final res = await http.post(
+      url,
+      headers: headers,
+      body: jsonEncode(payload),
+    );
+
     print('[TenantService] ← ${res.statusCode} ${res.body}');
+
     if (res.statusCode == 200 || res.statusCode == 201) {
       final body = jsonDecode(res.body);
       return body is Map ? body.cast<String, dynamic>() : <String, dynamic>{};
     }
+
     throw Exception('Failed to create tenant: ${res.statusCode}\n${res.body}');
   }
 
-  // ---- READ: by phone -------------------------------------------------------
-
   static Future<Map<String, dynamic>> getByPhone(String phone) async {
     final headers = await _jsonHeaders();
-    final url = _u('/tenants/by-phone', {'phone': phone});
+    final url = _u('/tenants/by-phone', {'phone': phone.trim()});
+
     print('[TenantService] GET $url');
     final res = await http.get(url, headers: headers);
     print('[TenantService] ← ${res.statusCode} ${res.body}');
+
     if (res.statusCode == 200) {
       final body = jsonDecode(res.body);
       return body is Map ? body.cast<String, dynamic>() : <String, dynamic>{};
     }
+
     throw Exception('Tenant not found: ${res.statusCode}\n${res.body}');
   }
-
-  // ---- READ: single by id (handy in settings/profile flows) -----------------
 
   static Future<TenantDto> getTenant(int tenantId) async {
     final headers = await _jsonHeaders();
     final url = _u('/tenants/$tenantId');
+
     print('[TenantService] GET $url');
     final res = await http.get(url, headers: headers);
     print('[TenantService] ← ${res.statusCode} ${res.body}');
+
     if (res.statusCode == 200) {
       final body = jsonDecode(res.body);
       if (body is Map<String, dynamic>) {
         return TenantDto.fromJson(body);
       }
     }
+
     throw Exception('Failed to fetch tenant $tenantId: ${res.statusCode}\n${res.body}');
   }
-
-  // ---- READ: me (if your backend exposes /tenants/me) -----------------------
 
   static Future<TenantDto?> getMe() async {
     final headers = await _jsonHeaders();
     final url = _u('/tenants/me');
+
     print('[TenantService] GET $url');
     final res = await http.get(url, headers: headers);
     print('[TenantService] ← ${res.statusCode} ${res.body}');
+
     if (res.statusCode == 200) {
       final body = jsonDecode(res.body);
       if (body is Map<String, dynamic>) {
@@ -158,11 +165,11 @@ class TenantService {
       }
       return null;
     }
+
     if (res.statusCode == 404) return null;
+
     throw Exception('Failed to fetch current tenant: ${res.statusCode}\n${res.body}');
   }
-
-  // ---- READ: list (search + paging + optional filter) -----------------------
 
   static Future<List<TenantDto>> fetchTenants({
     String? query,
@@ -174,20 +181,22 @@ class TenantService {
     final q = <String, String>{
       'page': '$page',
       'page_size': '$pageSize',
-      if (query != null && query.isNotEmpty) 'q': query,
+      if (query != null && query.trim().isNotEmpty) 'q': query.trim(),
       if (propertyId != null) 'property_id': '$propertyId',
     };
+
     final url = _u('/tenants', q);
 
     print('[TenantService] GET $url');
     final res = await http.get(url, headers: headers);
-    print('[TenantService] ← ${res.statusCode}');
+    print('[TenantService] ← ${res.statusCode} ${res.body}');
 
     if (res.statusCode == 200) {
       final data = jsonDecode(res.body);
       final list = (data is Map<String, dynamic>)
           ? (data['items'] ?? data['results'] ?? data['data'] ?? [])
           : data;
+
       if (list is List) {
         return list
             .whereType<Map>()
@@ -196,16 +205,16 @@ class TenantService {
       }
       return const [];
     }
+
     throw Exception('Failed to load tenants: ${res.statusCode}\n${res.body}');
   }
-
-  // ---- UPDATE (partial) -----------------------------------------------------
 
   static Future<Map<String, dynamic>> updateTenant({
     required int tenantId,
     String? name,
     String? phone,
     String? email,
+    String? password,
     String? idNumber,
     int? propertyId,
     int? unitId,
@@ -214,31 +223,32 @@ class TenantService {
     final url = _u('/tenants/$tenantId');
 
     final payload = <String, dynamic>{
-      'name': name,
-      'phone': phone,
-      'email': email,
-      'id_number': idNumber,
+      'name': name?.trim(),
+      'phone': phone?.trim(),
+      'email': email?.trim(),
+      'password': password?.trim(),
+      'id_number': idNumber?.trim(),
       'property_id': propertyId,
       'unit_id': unitId,
-    }..removeWhere((_, v) => v == null);
+    }..removeWhere((_, v) => v == null || (v is String && v.trim().isEmpty));
 
     print('[TenantService] PATCH $url');
     print('[TenantService] payload=$payload');
 
     final res = await http.patch(url, headers: headers, body: jsonEncode(payload));
     print('[TenantService] ← ${res.statusCode} ${res.body}');
+
     if (res.statusCode == 200) {
       final body = jsonDecode(res.body);
       return body is Map ? body.cast<String, dynamic>() : <String, dynamic>{};
     }
-    // Some APIs return 204 No Content for successful updates.
-    if (res.statusCode == 204 || (res.statusCode == 202 && (res.body.isEmpty))) {
+
+    if (res.statusCode == 204 || (res.statusCode == 202 && res.body.isEmpty)) {
       return <String, dynamic>{};
     }
+
     throw Exception('Failed to update tenant: ${res.statusCode}\n${res.body}');
   }
-
-  // ---- DELETE ---------------------------------------------------------------
 
   static Future<void> deleteTenant(int tenantId) async {
     final headers = await _jsonHeaders();
@@ -247,11 +257,11 @@ class TenantService {
     print('[TenantService] DELETE $url');
     final res = await http.delete(url, headers: headers);
     print('[TenantService] ← ${res.statusCode} ${res.body}');
+
     if (res.statusCode == 200 || res.statusCode == 204) return;
+
     throw Exception('Failed to delete tenant: ${res.statusCode}\n${res.body}');
   }
-
-  // ---- ASSIGN EXISTING TENANT ----------------------------------------------
 
   static Future<Map<String, dynamic>> assignExistingTenant({
     required String phone,
@@ -263,7 +273,7 @@ class TenantService {
     final url = _u('/tenants/assign-existing');
 
     final payload = {
-      'phone': phone,
+      'phone': phone.trim(),
       'unit_id': unitId,
       'rent_amount': rentAmount,
       'start_date': startDate.toIso8601String().split('T').first,
@@ -274,19 +284,22 @@ class TenantService {
 
     final res = await http.post(url, headers: headers, body: jsonEncode(payload));
     print('[TenantService] ← ${res.statusCode} ${res.body}');
+
     if (res.statusCode == 200 || res.statusCode == 201) {
       final body = jsonDecode(res.body);
       return body is Map ? body.cast<String, dynamic>() : <String, dynamic>{};
     }
+
     throw Exception('Failed to assign existing tenant: ${res.statusCode}\n${res.body}');
   }
 }
 
-// Keep this if you rely on it elsewhere.
 class HttpExceptionWithStatus implements Exception {
   final int statusCode;
   final String body;
+
   HttpExceptionWithStatus(this.statusCode, this.body);
+
   @override
   String toString() => 'HttpExceptionWithStatus($statusCode, $body)';
 }
