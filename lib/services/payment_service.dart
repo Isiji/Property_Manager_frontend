@@ -8,9 +8,6 @@ import 'package:property_manager_frontend/core/config.dart';
 import 'package:property_manager_frontend/utils/token_manager.dart';
 
 class PaymentService {
-  // -----------------------------
-  // Helpers
-  // -----------------------------
   static Map<String, dynamic> _tryDecodeMap(String body) {
     try {
       final v = jsonDecode(body);
@@ -34,6 +31,26 @@ class PaymentService {
     throw Exception(_errMsg(res));
   }
 
+  static List<String> _normalizePeriods({
+    String? period,
+    List<String>? periods,
+  }) {
+    final out = <String>[];
+
+    if (periods != null) {
+      for (final p in periods) {
+        final v = p.trim();
+        if (v.isNotEmpty) out.add(v);
+      }
+    }
+
+    if (out.isEmpty && period != null && period.trim().isNotEmpty) {
+      out.add(period.trim());
+    }
+
+    return out;
+  }
+
   // -----------------------------
   // M-Pesa STK Push (Tenant)
   // -----------------------------
@@ -41,14 +58,21 @@ class PaymentService {
     required int leaseId,
     required num amount,
     String? phone,
+    String? period,
+    List<String>? periods,
+    String? notes,
   }) async {
     final headers = await TokenManager.authHeaders();
     final url = Uri.parse('${AppConfig.apiBaseUrl}/payments/mpesa/initiate');
 
-    final payload = {
+    final normalizedPeriods = _normalizePeriods(period: period, periods: periods);
+
+    final payload = <String, dynamic>{
       'lease_id': leaseId,
       'amount': amount.toDouble(),
       'phone': phone,
+      'notes': notes,
+      if (normalizedPeriods.isNotEmpty) 'periods': normalizedPeriods,
     }..removeWhere((k, v) => v == null);
 
     print('[PaymentService] POST $url');
@@ -101,11 +125,14 @@ class PaymentService {
     String? paidDate,
     String? paidAtIso,
     String? period,
+    List<String>? periods,
   }) async {
     final headers = await TokenManager.authHeaders();
     final url = Uri.parse('${AppConfig.apiBaseUrl}/payments/record');
 
-    final payload = {
+    final normalizedPeriods = _normalizePeriods(period: period, periods: periods);
+
+    final payload = <String, dynamic>{
       'lease_id': leaseId,
       'amount': amount.toDouble(),
       'method': method,
@@ -113,7 +140,7 @@ class PaymentService {
       'notes': notes,
       'paid_date': paidDate,
       'paid_at': paidDate == null ? paidAtIso : null,
-      'period': period,
+      if (normalizedPeriods.isNotEmpty) 'periods': normalizedPeriods,
     }..removeWhere((k, v) => v == null);
 
     print('[PaymentService] POST $url');
