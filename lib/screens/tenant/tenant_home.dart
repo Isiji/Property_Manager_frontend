@@ -62,7 +62,7 @@ class _TenantHomeState extends State<TenantHome>
         final dash = await TenantPortalService.getOverview();
         _dashboard =
             (dash is Map) ? dash.cast<String, dynamic>() : <String, dynamic>{};
-      } catch (e) {
+      } catch (_) {
         _dashboard = const <String, dynamic>{};
       }
 
@@ -191,7 +191,53 @@ class _TenantHomeState extends State<TenantHome>
       v is Map ? v.cast<String, dynamic>() : <String, dynamic>{};
 
   bool _isTrue(dynamic v) =>
-      v == true || v?.toString().toLowerCase() == 'true';
+      v == true || v == 1 || v?.toString().toLowerCase() == 'true';
+
+  int? _leaseIdFromMap(Map<String, dynamic> lease) {
+    final raw = lease['id'];
+    if (raw is num) return raw.toInt();
+    return int.tryParse(raw?.toString() ?? '');
+  }
+
+  String _fmtMoney(dynamic v) {
+    if (v == null) return '—';
+    final n = num.tryParse(v.toString());
+    if (n == null) return v.toString();
+    return 'KES ${n.toStringAsFixed(2)}';
+  }
+
+  String _fmtDate(dynamic v) {
+    if (v == null) return '—';
+    final s = v.toString();
+    if (s.isEmpty) return '—';
+    final d = DateTime.tryParse(s);
+    if (d == null) return s;
+    return DateFormat.yMMMd().format(d);
+  }
+
+  Future<void> _openLeaseView(int leaseId) async {
+    await Navigator.pushNamed(
+      context,
+      '/lease-view',
+      arguments: {'leaseId': leaseId},
+    );
+    await _loadAll();
+  }
+
+  Future<void> _downloadLease(int leaseId) async {
+    try {
+      await LeaseService.downloadLeasePdf(leaseId);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Lease download started')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Lease download failed: $e')),
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -203,95 +249,103 @@ class _TenantHomeState extends State<TenantHome>
       return const Center(child: CircularProgressIndicator());
     }
 
-    return Column(
-      children: [
-        Container(
-          margin: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-          padding: const EdgeInsets.all(6),
-          decoration: BoxDecoration(
-            color: const Color(0xFF0F172A),
-            borderRadius: BorderRadius.circular(14),
-          ),
-          child: TabBar(
-            controller: _tab,
-            isScrollable: false,
-            labelColor: Colors.white,
-            unselectedLabelColor: Colors.white70,
-            dividerColor: Colors.transparent,
-            indicator: BoxDecoration(
-              color: const Color(0xFF1E88E5),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            labelStyle: const TextStyle(
-              fontWeight: FontWeight.w600,
-              fontSize: 13,
-            ),
-            unselectedLabelStyle: const TextStyle(
-              fontWeight: FontWeight.w500,
-              fontSize: 13,
-            ),
-            tabs: const [
-              Tab(
-                text: 'Dashboard',
-                icon: Icon(Icons.dashboard_customize_rounded, size: 18),
-              ),
-              Tab(
-                text: 'Payments',
-                icon: Icon(Icons.receipt_long_rounded, size: 18),
-              ),
-              Tab(
-                text: 'Maintenance',
-                icon: Icon(Icons.build_rounded, size: 18),
-              ),
-              Tab(
-                text: 'Profile',
-                icon: Icon(Icons.person_rounded, size: 18),
-              ),
-            ],
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  'Tenant • $ym',
-                  style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w800,
-                    color: Color(0xFF0F172A),
+    return SafeArea(
+      bottom: false,
+      child: Column(
+        children: [
+          Material(
+            color: Colors.transparent,
+            child: Container(
+              margin: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+              child: Material(
+                color: const Color(0xFF0F172A),
+                borderRadius: BorderRadius.circular(14),
+                child: Padding(
+                  padding: const EdgeInsets.all(6),
+                  child: TabBar(
+                    controller: _tab,
+                    isScrollable: false,
+                    labelColor: Colors.white,
+                    unselectedLabelColor: Colors.white70,
+                    dividerColor: Colors.transparent,
+                    indicator: BoxDecoration(
+                      color: const Color(0xFF1E88E5),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    labelStyle: const TextStyle(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 13,
+                    ),
+                    unselectedLabelStyle: const TextStyle(
+                      fontWeight: FontWeight.w500,
+                      fontSize: 13,
+                    ),
+                    tabs: const [
+                      Tab(
+                        text: 'Dashboard',
+                        icon: Icon(Icons.dashboard_customize_rounded, size: 18),
+                      ),
+                      Tab(
+                        text: 'Payments',
+                        icon: Icon(Icons.receipt_long_rounded, size: 18),
+                      ),
+                      Tab(
+                        text: 'Maintenance',
+                        icon: Icon(Icons.build_rounded, size: 18),
+                      ),
+                      Tab(
+                        text: 'Profile',
+                        icon: Icon(Icons.person_rounded, size: 18),
+                      ),
+                    ],
                   ),
                 ),
               ),
-              FilledButton.icon(
-                style: FilledButton.styleFrom(
-                  backgroundColor: const Color(0xFF1E88E5),
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Tenant • $ym',
+                    style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w800,
+                      color: Color(0xFF0F172A),
+                    ),
                   ),
                 ),
-                onPressed: _loadAll,
-                icon: const Icon(Icons.refresh_rounded),
-                label: const Text('Refresh'),
-              ),
-            ],
+                FilledButton.icon(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF1E88E5),
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  onPressed: _loadAll,
+                  icon: const Icon(Icons.refresh_rounded),
+                  label: const Text('Refresh'),
+                ),
+              ],
+            ),
           ),
-        ),
-        const SizedBox(height: 8),
-        Expanded(
-          child: TabBarView(
-            controller: _tab,
-            children: [
-              _dashboardTab(context, t),
-              _paymentsTab(context, t),
-              _maintenanceTab(context, t),
-              _profileTab(context, t),
-            ],
+          const SizedBox(height: 8),
+          Expanded(
+            child: TabBarView(
+              controller: _tab,
+              children: [
+                _dashboardTab(context, t),
+                _paymentsTab(context, t),
+                _maintenanceTab(context, t),
+                _profileTab(context, t),
+              ],
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
@@ -309,6 +363,11 @@ class _TenantHomeState extends State<TenantHome>
     final expected = (status['expected'] ?? 0).toString();
     final received = (status['received'] ?? 0).toString();
     final balance = (status['balance'] ?? 0).toString();
+
+    final activeLease = _myLeases.isNotEmpty
+        ? _asMap(_myLeases.first)
+        : (lease.isNotEmpty ? lease : <String, dynamic>{});
+    final activeLeaseId = _leaseIdFromMap(activeLease);
 
     return RefreshIndicator(
       onRefresh: _loadAll,
@@ -387,7 +446,7 @@ class _TenantHomeState extends State<TenantHome>
                       Text(
                         'Unit $unitLabel • Rent: $rent',
                         style: t.textTheme.bodyMedium?.copyWith(
-                          color: const Color.fromARGB(145, 0, 10, 18),
+                          color: Colors.black87,
                         ),
                       ),
                     ],
@@ -416,6 +475,125 @@ class _TenantHomeState extends State<TenantHome>
             ),
           ),
           const SizedBox(height: 16),
+          if (activeLease.isNotEmpty)
+            Container(
+              padding: const EdgeInsets.all(18),
+              margin: const EdgeInsets.only(bottom: 16),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: t.dividerColor.withOpacity(.20)),
+                boxShadow: [
+                  BoxShadow(
+                    blurRadius: 18,
+                    color: Colors.black.withOpacity(.04),
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFEEF2FF),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Icon(
+                          Icons.description_rounded,
+                          color: Color(0xFF1E40AF),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          'Active Lease',
+                          style: t.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
+                        decoration: BoxDecoration(
+                          color: _isTrue(activeLease['active'])
+                              ? t.colorScheme.tertiaryContainer
+                              : t.colorScheme.errorContainer,
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text(
+                          _isTrue(activeLease['active']) ? 'ACTIVE' : 'INACTIVE',
+                          style: t.textTheme.labelSmall?.copyWith(
+                            fontWeight: FontWeight.w800,
+                            color: _isTrue(activeLease['active'])
+                                ? t.colorScheme.onTertiaryContainer
+                                : t.colorScheme.onErrorContainer,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  Wrap(
+                    spacing: 12,
+                    runSpacing: 10,
+                    children: [
+                      _leaseMetaChip(
+                        t,
+                        Icons.payments_rounded,
+                        'Rent: ${_fmtMoney(activeLease['rent_amount'])}',
+                      ),
+                      _leaseMetaChip(
+                        t,
+                        Icons.event_rounded,
+                        'Start: ${_fmtDate(activeLease['start_date'])}',
+                      ),
+                      _leaseMetaChip(
+                        t,
+                        Icons.event_busy_rounded,
+                        'End: ${_fmtDate(activeLease['end_date'])}',
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  if (activeLeaseId != null)
+                    Wrap(
+                      spacing: 10,
+                      runSpacing: 10,
+                      children: [
+                        FilledButton.icon(
+                          style: FilledButton.styleFrom(
+                            backgroundColor: const Color(0xFF1E88E5),
+                            foregroundColor: Colors.white,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                          onPressed: () => _openLeaseView(activeLeaseId),
+                          icon: const Icon(Icons.visibility_rounded),
+                          label: const Text('View Lease'),
+                        ),
+                        OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                          onPressed: () => _downloadLease(activeLeaseId),
+                          icon: const Icon(Icons.picture_as_pdf_rounded),
+                          label: const Text('Download PDF'),
+                        ),
+                      ],
+                    ),
+                ],
+              ),
+            ),
           Wrap(
             spacing: 12,
             runSpacing: 12,
@@ -447,7 +625,9 @@ class _TenantHomeState extends State<TenantHome>
             ],
           ),
           const SizedBox(height: 18),
-          Row(
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
             children: [
               FilledButton.icon(
                 style: FilledButton.styleFrom(
@@ -502,7 +682,6 @@ class _TenantHomeState extends State<TenantHome>
                 icon: const Icon(Icons.credit_card_rounded),
                 label: const Text('Pay Now'),
               ),
-              const SizedBox(width: 8),
               OutlinedButton.icon(
                 style: OutlinedButton.styleFrom(
                   padding:
@@ -516,6 +695,30 @@ class _TenantHomeState extends State<TenantHome>
                 label: const Text('Maintenance'),
               ),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _leaseMetaChip(ThemeData t, IconData icon, String text) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: t.colorScheme.surfaceContainerHighest.withOpacity(.45),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 16, color: t.colorScheme.onSurfaceVariant),
+          const SizedBox(width: 6),
+          Text(
+            text,
+            style: t.textTheme.labelMedium?.copyWith(
+              color: t.colorScheme.onSurfaceVariant,
+              fontWeight: FontWeight.w600,
+            ),
           ),
         ],
       ),
@@ -897,7 +1100,7 @@ class _TenantHomeState extends State<TenantHome>
             boxShadow: [
               BoxShadow(
                 blurRadius: 18,
-                color: const Color.fromARGB(255, 115, 129, 172).withOpacity(.04),
+                color: Colors.black.withOpacity(.04),
                 offset: const Offset(0, 4),
               ),
             ],

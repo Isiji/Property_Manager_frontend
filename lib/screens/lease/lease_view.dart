@@ -1,6 +1,3 @@
-// lib/screens/lease/lease_view.dart
-// Reusable lease viewer for landlord or tenant. Printable + accept terms + activate.
-
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:property_manager_frontend/services/lease_service.dart';
@@ -31,13 +28,17 @@ class _LeaseViewScreenState extends State<LeaseViewScreen> {
       _leaseId = (args['leaseId'] as num).toInt();
     }
     _role = await TokenManager.currentRole() ?? 'tenant';
+
     if (_leaseId == null) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Missing lease id')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Missing lease id')),
+        );
         Navigator.pop(context);
       }
       return;
     }
+
     await _load();
   }
 
@@ -49,7 +50,9 @@ class _LeaseViewScreenState extends State<LeaseViewScreen> {
       setState(() => _lease = res);
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Load failed: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Load failed: $e')),
+      );
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -59,14 +62,31 @@ class _LeaseViewScreenState extends State<LeaseViewScreen> {
     if (iso == null || iso.isEmpty) return '—';
     final d = DateTime.tryParse(iso);
     return d == null ? iso : DateFormat.yMMMd().format(d);
-    }
+  }
+
+  String _fmtMoney(dynamic value) {
+    if (value == null) return '—';
+    final n = num.tryParse(value.toString());
+    if (n == null) return value.toString();
+    return 'KES ${n.toStringAsFixed(2)}';
+  }
+
+  String _v(dynamic value) {
+    final s = (value ?? '').toString().trim();
+    return s.isEmpty ? '—' : s;
+  }
+
+  bool _isTrue(dynamic v) =>
+      v == true || v == 1 || v?.toString().toLowerCase() == 'true';
 
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context);
+
     return Scaffold(
+      backgroundColor: const Color(0xFFF8FAFC),
       appBar: AppBar(
-        title: const Text('Lease'),
+        title: const Text('Lease Details'),
         actions: [
           if (_leaseId != null)
             IconButton(
@@ -75,10 +95,14 @@ class _LeaseViewScreenState extends State<LeaseViewScreen> {
                 try {
                   await LeaseService.downloadLeasePdf(_leaseId!);
                   if (!mounted) return;
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Download started')));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Lease download started')),
+                  );
                 } catch (e) {
                   if (!mounted) return;
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed: $e')));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Failed: $e')),
+                  );
                 }
               },
               icon: const Icon(Icons.picture_as_pdf_rounded),
@@ -94,22 +118,61 @@ class _LeaseViewScreenState extends State<LeaseViewScreen> {
                   t,
                   title: 'Parties',
                   children: [
-                    _row(t, 'Tenant', _lease['tenant_name'] ?? '—'),
-                    _row(t, 'Tenant Phone', _lease['tenant_phone'] ?? '—'),
-                    _row(t, 'Landlord', _lease['landlord_name'] ?? '—'),
-                    _row(t, 'Property', _lease['property_name'] ?? '—'),
-                    _row(t, 'Unit', _lease['unit_number'] ?? '—'),
+                    _row(t, 'Tenant', _v(_lease['tenant_name'])),
+                    _row(t, 'Tenant Phone', _v(_lease['tenant_phone'])),
+                    _row(t, 'Tenant Email', _v(_lease['tenant_email'])),
+                    _row(t, 'Tenant ID No.', _v(_lease['tenant_id_number'])),
+                    const Divider(height: 20),
+                    _row(t, 'Landlord', _v(_lease['landlord_name'])),
+                    _row(t, 'Landlord Phone', _v(_lease['landlord_phone'])),
+                    _row(t, 'Landlord Email', _v(_lease['landlord_email'])),
+                    if ((_lease['manager_name'] ?? '').toString().isNotEmpty ||
+                        (_lease['manager_company_name'] ?? '').toString().isNotEmpty) ...[
+                      const Divider(height: 20),
+                      _row(
+                        t,
+                        'Manager / Agency',
+                        _v(
+                          (_lease['manager_company_name'] ?? '').toString().isNotEmpty
+                              ? _lease['manager_company_name']
+                              : _lease['manager_name'],
+                        ),
+                      ),
+                      _row(t, 'Manager Phone', _v(_lease['manager_phone'])),
+                      _row(t, 'Manager Email', _v(_lease['manager_email'])),
+                    ],
                   ],
                 ),
                 const SizedBox(height: 12),
                 _sectionCard(
                   t,
-                  title: 'Terms',
+                  title: 'Premises',
                   children: [
-                    _row(t, 'Rent (KSh)', (_lease['rent_amount'] ?? '').toString()),
+                    _row(t, 'Property', _v(_lease['property_name'])),
+                    _row(t, 'Property Code', _v(_lease['property_code'])),
+                    _row(t, 'Property Address', _v(_lease['property_address'])),
+                    _row(t, 'Unit', _v(_lease['unit_number'])),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                _sectionCard(
+                  t,
+                  title: 'Lease Terms',
+                  children: [
+                    _row(t, 'Rent', _fmtMoney(_lease['rent_amount'])),
                     _row(t, 'Start Date', _fmtDate(_lease['start_date']?.toString())),
                     _row(t, 'End Date', _fmtDate(_lease['end_date']?.toString())),
-                    _row(t, 'Status', (_lease['status'] ?? '').toString().toUpperCase()),
+                    _row(t, 'Status', _v(_lease['status']).toUpperCase()),
+                    _row(
+                      t,
+                      'Terms Accepted',
+                      _isTrue(_lease['terms_accepted']) ? 'YES' : 'NO',
+                    ),
+                    _row(
+                      t,
+                      'Accepted At',
+                      _fmtDate(_lease['terms_accepted_at']?.toString()),
+                    ),
                   ],
                 ),
                 const SizedBox(height: 12),
@@ -118,8 +181,8 @@ class _LeaseViewScreenState extends State<LeaseViewScreen> {
                   title: 'Terms & Conditions',
                   children: [
                     Text(
-                      (_lease['terms_text'] ?? 'Standard residential lease terms apply.').toString(),
-                      style: t.textTheme.bodyMedium,
+                      _v(_lease['terms_text']),
+                      style: t.textTheme.bodyMedium?.copyWith(height: 1.5),
                     ),
                   ],
                 ),
@@ -132,9 +195,12 @@ class _LeaseViewScreenState extends State<LeaseViewScreen> {
   }
 
   Widget _tenantActions(ThemeData t) {
-    final accepted = (_lease['terms_accepted'] == true);
-    final active = (_lease['active'] == true);
-    return Row(
+    final accepted = _isTrue(_lease['terms_accepted']);
+    final active = _isTrue(_lease['active']);
+
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
       children: [
         if (!accepted)
           FilledButton(
@@ -143,15 +209,18 @@ class _LeaseViewScreenState extends State<LeaseViewScreen> {
                 await LeaseService.acceptTerms(_leaseId!);
                 await _load();
                 if (!mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Terms accepted')));
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Terms accepted')),
+                );
               } catch (e) {
                 if (!mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed: $e')));
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Failed: $e')),
+                );
               }
             },
             child: const Text('Accept Terms'),
           ),
-        const SizedBox(width: 8),
         if (accepted && !active)
           FilledButton(
             onPressed: () async {
@@ -159,10 +228,14 @@ class _LeaseViewScreenState extends State<LeaseViewScreen> {
                 await LeaseService.activateLease(_leaseId!);
                 await _load();
                 if (!mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Lease activated')));
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Lease activated')),
+                );
               } catch (e) {
                 if (!mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed: $e')));
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Failed: $e')),
+                );
               }
             },
             child: const Text('Activate Lease'),
@@ -172,7 +245,7 @@ class _LeaseViewScreenState extends State<LeaseViewScreen> {
   }
 
   Widget _landlordActions(ThemeData t) {
-    final active = (_lease['active'] == true);
+    final active = _isTrue(_lease['active']);
     return Row(
       children: [
         if (!active)
@@ -184,7 +257,11 @@ class _LeaseViewScreenState extends State<LeaseViewScreen> {
     );
   }
 
-  Widget _sectionCard(ThemeData t, {required String title, required List<Widget> children}) {
+  Widget _sectionCard(
+    ThemeData t, {
+    required String title,
+    required List<Widget> children,
+  }) {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -195,7 +272,12 @@ class _LeaseViewScreenState extends State<LeaseViewScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(title, style: t.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
+          Text(
+            title,
+            style: t.textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w800,
+            ),
+          ),
           const SizedBox(height: 10),
           ...children,
         ],
@@ -207,8 +289,17 @@ class _LeaseViewScreenState extends State<LeaseViewScreen> {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(width: 180, child: Text(k, style: t.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w700))),
+          SizedBox(
+            width: 180,
+            child: Text(
+              k,
+              style: t.textTheme.bodyMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
           Expanded(child: Text(v)),
         ],
       ),
