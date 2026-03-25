@@ -320,7 +320,57 @@ class _TenantHomeState extends State<TenantHome>
       text: expected > 0 ? expected.toStringAsFixed(2) : '',
     );
     final phoneCtrl = TextEditingController();
+
     bool processing = false;
+    bool amountManuallyEdited = false;
+
+    num calcSuggestedAmount(Set<String> periods) {
+      final chosenRows = rows
+          .where((r) => periods.contains((r['period'] ?? '').toString()))
+          .toList();
+
+      return chosenRows.fold<num>(
+        0,
+        (sum, r) => sum + _toNum(r['balance'], 0),
+      );
+    }
+
+    void syncAmountIfNotManual(void Function(void Function()) setLocal) {
+      final suggestedAmount = calcSuggestedAmount(selected);
+      if (!amountManuallyEdited) {
+        setLocal(() {
+          amountCtrl.text =
+              suggestedAmount > 0 ? suggestedAmount.toStringAsFixed(2) : '';
+        });
+      }
+    }
+
+    Future<void> pollForPaymentUpdate() async {
+      for (int i = 0; i < 8; i++) {
+        await Future.delayed(const Duration(seconds: 3));
+        try {
+          await _loadAll();
+
+          final items = List<Map<String, dynamic>>.from(
+            _payments.map(
+              (e) => (e is Map) ? e.cast<String, dynamic>() : <String, dynamic>{},
+            ),
+          );
+
+          final recent = items.isNotEmpty ? items.first : null;
+          if (recent != null) {
+            final status = (recent['status'] ?? '').toString().toLowerCase();
+            final ref = (recent['reference'] ?? '').toString();
+            if (status == 'paid' || ref.isNotEmpty) {
+              if (mounted) {
+                _showSnack('Payment confirmed successfully.');
+              }
+              return;
+            }
+          }
+        } catch (_) {}
+      }
+    }
 
     await showDialog(
       context: context,
@@ -336,11 +386,6 @@ class _TenantHomeState extends State<TenantHome>
               0,
               (sum, r) => sum + _toNum(r['balance'], 0),
             );
-
-            if ((amountCtrl.text.isEmpty || amountCtrl.text == '0.00') &&
-                suggestedAmount > 0) {
-              amountCtrl.text = suggestedAmount.toStringAsFixed(2);
-            }
 
             return AlertDialog(
               shape: RoundedRectangleBorder(
@@ -431,6 +476,7 @@ class _TenantHomeState extends State<TenantHome>
                                                 selected.add(period);
                                               }
                                             });
+                                            syncAmountIfNotManual(setLocal);
                                           }
                                         : null,
                                     child: Container(
@@ -459,6 +505,7 @@ class _TenantHomeState extends State<TenantHome>
                                                         selected.add(period);
                                                       }
                                                     });
+                                                    syncAmountIfNotManual(setLocal);
                                                   }
                                                 : null,
                                           ),
@@ -562,6 +609,9 @@ class _TenantHomeState extends State<TenantHome>
                         keyboardType: const TextInputType.numberWithOptions(
                           decimal: true,
                         ),
+                        onChanged: (_) {
+                          amountManuallyEdited = true;
+                        },
                         decoration: InputDecoration(
                           labelText: 'Amount to pay',
                           hintText: 'Enter amount',
@@ -569,6 +619,14 @@ class _TenantHomeState extends State<TenantHome>
                               ? 'Suggested: ${_fmtMoney(suggestedAmount)}'
                               : 'You can enter a partial amount if agreed with landlord',
                           prefixIcon: const Icon(Icons.payments_rounded),
+                          suffixIcon: IconButton(
+                            tooltip: 'Reset to suggested amount',
+                            icon: const Icon(Icons.refresh_rounded),
+                            onPressed: () {
+                              amountManuallyEdited = false;
+                              syncAmountIfNotManual(setLocal);
+                            },
+                          ),
                         ),
                       ),
                       const SizedBox(height: 12),
@@ -650,7 +708,9 @@ class _TenantHomeState extends State<TenantHome>
                             _showSnack(
                               'STK sent. Ref: ${res['checkout_request_id'] ?? '—'}',
                             );
+
                             await _loadAll();
+                            await pollForPaymentUpdate();
                           } catch (e) {
                             setLocal(() => processing = false);
                             _showSnack('Payment start failed: $e');
@@ -672,7 +732,6 @@ class _TenantHomeState extends State<TenantHome>
       },
     );
   }
-
   Widget _miniBadge(String text, Color bg, Color fg) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
