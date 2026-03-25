@@ -1,4 +1,3 @@
-// tenant_home.dart
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -36,6 +35,9 @@ class _TenantHomeState extends State<TenantHome>
     super.initState();
     _tab = TabController(length: 4, vsync: this);
     _loadAll();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadAll();
+    });
   }
 
   @override
@@ -103,6 +105,14 @@ class _TenantHomeState extends State<TenantHome>
     } finally {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  Future<void> _logout() async {
+    try {
+      await TokenManager.clearSession();
+    } catch (_) {}
+    if (!mounted) return;
+    Navigator.pushNamedAndRemoveUntil(context, '/login', (_) => false);
   }
 
   void _showSnack(String message) {
@@ -732,6 +742,7 @@ class _TenantHomeState extends State<TenantHome>
       },
     );
   }
+
   Widget _miniBadge(String text, Color bg, Color fg) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
@@ -778,6 +789,21 @@ class _TenantHomeState extends State<TenantHome>
                 children: [
                   Row(
                     children: [
+                      IconButton(
+                        tooltip: 'Back',
+                        onPressed: () {
+                          if (Navigator.canPop(context)) {
+                            Navigator.pop(context);
+                          } else {
+                            Navigator.pushReplacementNamed(context, '/dashboard');
+                          }
+                        },
+                        icon: const Icon(
+                          Icons.arrow_back_rounded,
+                          color: Colors.white,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -810,6 +836,19 @@ class _TenantHomeState extends State<TenantHome>
                         onPressed: _loadAll,
                         icon: const Icon(Icons.refresh_rounded),
                         label: const Text('Refresh'),
+                      ),
+                      const SizedBox(width: 8),
+                      OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.white,
+                          side: const BorderSide(color: Colors.white54),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        onPressed: _logout,
+                        icon: const Icon(Icons.logout_rounded),
+                        label: const Text('Logout'),
                       ),
                     ],
                   ),
@@ -886,17 +925,19 @@ class _TenantHomeState extends State<TenantHome>
     final thisMonth = _asMap(d['this_month']);
     final planner = _asMap(d['planner']);
 
-    final unitLabel = (unit['number'] ?? '—').toString();
-    final propertyName = (unit['property_name'] ?? 'Your Property').toString();
-    final rentAmount = _fmtMoney(lease['rent_amount']);
-    final paid = _isTrue(thisMonth['paid']);
-    final statusText =
-        (thisMonth['status'] ?? (paid ? 'paid' : 'unpaid')).toString();
-
     final activeLease = _myLeases.isNotEmpty
         ? _asMap(_myLeases.first)
         : (lease.isNotEmpty ? lease : <String, dynamic>{});
     final activeLeaseId = _leaseIdFromMap(activeLease);
+
+    final unitLabel = (unit['number'] ?? '—').toString();
+    final propertyName = (unit['property_name'] ?? 'Your Property').toString();
+    final rentAmount = _fmtMoney(
+      activeLease['rent_amount'] ?? lease['rent_amount'],
+    );
+    final paid = _isTrue(thisMonth['paid']);
+    final statusText =
+        (thisMonth['status'] ?? (paid ? 'paid' : 'unpaid')).toString();
 
     return RefreshIndicator(
       onRefresh: _loadAll,
@@ -1970,7 +2011,7 @@ class _TenantHomeState extends State<TenantHome>
               borderRadius: BorderRadius.circular(18),
               border: Border.all(color: const Color(0xFFE5E7EB)),
             ),
-            child: const Text('No maintenance requests yet.')
+            child: const Text('No maintenance requests yet.'),
           )
         else
           ...ticketWidgets,
