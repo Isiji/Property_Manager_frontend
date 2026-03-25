@@ -1,3 +1,6 @@
+// tenant_home.dart
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:property_manager_frontend/services/tenant_portal_service.dart';
@@ -166,7 +169,7 @@ class _TenantHomeState extends State<TenantHome>
     if (s.isEmpty) return '—';
     final d = DateTime.tryParse(s);
     if (d == null) return s;
-    return DateFormat('dd MMM yyyy • HH:mm').format(d);
+    return DateFormat('dd MMM yyyy • HH:mm').format(d.toLocal());
   }
 
   String _prettyMonth(String yyyymm) {
@@ -177,6 +180,26 @@ class _TenantHomeState extends State<TenantHome>
     } catch (_) {
       return yyyymm;
     }
+  }
+
+  Map<String, dynamic> _paymentNotesMap(Map<String, dynamic> payment) {
+    final raw = payment['notes'];
+    if (raw == null) return <String, dynamic>{};
+
+    if (raw is Map) {
+      return raw.cast<String, dynamic>();
+    }
+
+    if (raw is String && raw.trim().isNotEmpty) {
+      try {
+        final decoded = jsonDecode(raw);
+        if (decoded is Map) {
+          return decoded.cast<String, dynamic>();
+        }
+      } catch (_) {}
+    }
+
+    return <String, dynamic>{};
   }
 
   Future<void> _openLeaseView(int leaseId) async {
@@ -495,6 +518,45 @@ class _TenantHomeState extends State<TenantHome>
                               ),
                       ),
                       const SizedBox(height: 16),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF8FAFC),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: const Color(0xFFE2E8F0)),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Payment Summary',
+                              style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                            ),
+                            const SizedBox(height: 8),
+                            Text('Months selected: ${selected.length}'),
+                            const SizedBox(height: 4),
+                            Text(
+                              'Suggested amount: ${_fmtMoney(suggestedAmount)}',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w800,
+                                fontSize: 16,
+                                color: Color(0xFF0F172A),
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              selected.isEmpty
+                                  ? 'No periods selected'
+                                  : selected.map(_prettyMonth).join(', '),
+                              style: const TextStyle(color: Color(0xFF475569)),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 16),
                       TextFormField(
                         controller: amountCtrl,
                         keyboardType: const TextInputType.numberWithOptions(
@@ -505,7 +567,7 @@ class _TenantHomeState extends State<TenantHome>
                           hintText: 'Enter amount',
                           helperText: suggestedAmount > 0
                               ? 'Suggested: ${_fmtMoney(suggestedAmount)}'
-                              : null,
+                              : 'You can enter a partial amount if agreed with landlord',
                           prefixIcon: const Icon(Icons.payments_rounded),
                         ),
                       ),
@@ -544,6 +606,34 @@ class _TenantHomeState extends State<TenantHome>
                             return;
                           }
 
+                          final confirmed = await showDialog<bool>(
+                            context: dialogCtx,
+                            builder: (confirmCtx) => AlertDialog(
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              title: const Text('Confirm Payment'),
+                              content: Text(
+                                'You are about to pay ${_fmtMoney(amount)} for '
+                                '${periods.length} month(s):\n\n'
+                                '${periods.map(_prettyMonth).join(', ')}\n\n'
+                                'Continue with M-Pesa STK push?',
+                              ),
+                              actions: [
+                                TextButton(
+                                  onPressed: () => Navigator.pop(confirmCtx, false),
+                                  child: const Text('No'),
+                                ),
+                                FilledButton(
+                                  onPressed: () => Navigator.pop(confirmCtx, true),
+                                  child: const Text('Yes, Continue'),
+                                ),
+                              ],
+                            ),
+                          );
+
+                          if (confirmed != true) return;
+
                           setLocal(() => processing = true);
                           try {
                             final res = await PaymentService.initiateMpesa(
@@ -558,7 +648,7 @@ class _TenantHomeState extends State<TenantHome>
                             if (!mounted) return;
                             Navigator.pop(dialogCtx);
                             _showSnack(
-                              'STK sent. Ref: ${res['checkout_request_id'] ?? res['checkout_id'] ?? '—'}',
+                              'STK sent. Ref: ${res['checkout_request_id'] ?? '—'}',
                             );
                             await _loadAll();
                           } catch (e) {
@@ -1439,6 +1529,15 @@ class _TenantHomeState extends State<TenantHome>
           final id = (p['id'] as num?)?.toInt();
           final allocations = _asMapList(p['allocations']);
 
+          final notes = _paymentNotesMap(p);
+          final mpesaReceipt = (notes['mpesa_receipt_number'] ?? ref).toString();
+          final mpesaPhone = (notes['mpesa_phone_number'] ?? '').toString();
+          final mpesaTxTime = (notes['mpesa_transaction_date_iso'] ?? '').toString();
+          final merchantRequestId =
+              (notes['merchant_request_id'] ?? p['merchant_request_id'] ?? '').toString();
+          final checkoutRequestId =
+              (notes['checkout_request_id'] ?? p['checkout_request_id'] ?? '').toString();
+
           final isPaid = status == 'paid';
           final statusBg = isPaid
               ? const Color(0xFFECFDF5)
@@ -1572,10 +1671,49 @@ class _TenantHomeState extends State<TenantHome>
                     ),
                     _metaChip(
                       Icons.numbers_rounded,
-                      'Ref: ${ref.isEmpty ? '—' : ref}',
+                      'Ref: ${mpesaReceipt.isEmpty ? '—' : mpesaReceipt}',
                     ),
+                    if (mpesaPhone.isNotEmpty)
+                      _metaChip(
+                        Icons.phone_android_rounded,
+                        'Phone: $mpesaPhone',
+                      ),
+                    if (mpesaTxTime.isNotEmpty)
+                      _metaChip(
+                        Icons.access_time_rounded,
+                        'Tx Time: ${_fmtDateTime(mpesaTxTime)}',
+                      ),
                   ],
                 ),
+                if (merchantRequestId.isNotEmpty || checkoutRequestId.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF8FAFC),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: const Color(0xFFE2E8F0)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'M-Pesa Details',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w800,
+                            color: Color(0xFF0F172A),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        if (merchantRequestId.isNotEmpty)
+                          Text('Merchant Request ID: $merchantRequestId'),
+                        if (checkoutRequestId.isNotEmpty)
+                          Text('Checkout Request ID: $checkoutRequestId'),
+                      ],
+                    ),
+                  ),
+                ],
                 if (allocationWidgets.isNotEmpty) ...<Widget>[
                   const SizedBox(height: 14),
                   Text(
