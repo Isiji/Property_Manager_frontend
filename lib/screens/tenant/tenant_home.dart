@@ -24,6 +24,7 @@ class _TenantHomeState extends State<TenantHome>
   List<dynamic> _payments = const [];
   List<dynamic> _tickets = const [];
   List<dynamic> _myLeases = const [];
+  List<Map<String, dynamic>> _rentals = const [];
 
   final _nameCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
@@ -35,9 +36,6 @@ class _TenantHomeState extends State<TenantHome>
     super.initState();
     _tab = TabController(length: 4, vsync: this);
     _loadAll();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _loadAll();
-    });
   }
 
   @override
@@ -56,6 +54,9 @@ class _TenantHomeState extends State<TenantHome>
 
       final role = await TokenManager.currentRole();
       if (role != 'tenant') {
+        if (mounted) {
+          setState(() => _loading = false);
+        }
         _showSnack('Please log in as a tenant.');
         return;
       }
@@ -64,8 +65,20 @@ class _TenantHomeState extends State<TenantHome>
         final dash = await TenantPortalService.getOverview();
         _dashboard =
             (dash is Map) ? dash.cast<String, dynamic>() : <String, dynamic>{};
+
+        final rentalsRaw = _dashboard['rentals'];
+        if (rentalsRaw is List) {
+          _rentals = rentalsRaw
+              .map<Map<String, dynamic>>(
+                (e) => e is Map ? e.cast<String, dynamic>() : <String, dynamic>{},
+              )
+              .toList();
+        } else {
+          _rentals = const [];
+        }
       } catch (_) {
         _dashboard = const <String, dynamic>{};
+        _rentals = const [];
       }
 
       try {
@@ -95,10 +108,12 @@ class _TenantHomeState extends State<TenantHome>
             ? profile.cast<String, dynamic>()
             : <String, dynamic>{};
 
-        _nameCtrl.text = (p['name'] ?? '').toString();
-        _phoneCtrl.text = (p['phone'] ?? '').toString();
-        _emailCtrl.text = (p['email'] ?? '').toString();
-        _idCtrl.text = (p['id_number'] ?? '').toString();
+        final tenant = _asMap(p['tenant']).isNotEmpty ? _asMap(p['tenant']) : p;
+
+        _nameCtrl.text = (tenant['name'] ?? '').toString();
+        _phoneCtrl.text = (tenant['phone'] ?? '').toString();
+        _emailCtrl.text = (tenant['email'] ?? '').toString();
+        _idCtrl.text = (tenant['id_number'] ?? '').toString();
       } catch (_) {}
 
       if (mounted) setState(() {});
@@ -117,17 +132,10 @@ class _TenantHomeState extends State<TenantHome>
 
   void _showSnack(String message) {
     if (!mounted) return;
-
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      final messenger = ScaffoldMessenger.maybeOf(context);
-      if (messenger == null) {
-        debugPrint('[TenantHome] Snack skipped: no ScaffoldMessenger -> $message');
-        return;
-      }
-      messenger.hideCurrentSnackBar();
-      messenger.showSnackBar(SnackBar(content: Text(message)));
-    });
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    if (messenger == null) return;
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(SnackBar(content: Text(message)));
   }
 
   Map<String, dynamic> _asMap(dynamic v) =>
@@ -142,11 +150,16 @@ class _TenantHomeState extends State<TenantHome>
         .toList();
   }
 
+  List<String> _asStringList(dynamic v) {
+    if (v is! List) return const <String>[];
+    return List<String>.from(v.map((e) => e.toString()));
+  }
+
   bool _isTrue(dynamic v) =>
       v == true || v == 1 || v?.toString().toLowerCase() == 'true';
 
   int? _leaseIdFromMap(Map<String, dynamic> lease) {
-    final raw = lease['id'];
+    final raw = lease['id'] ?? lease['lease_id'];
     if (raw is num) return raw.toInt();
     return int.tryParse(raw?.toString() ?? '');
   }
@@ -230,7 +243,7 @@ class _TenantHomeState extends State<TenantHome>
     }
   }
 
-  Future<void> _submitMaintenance() async {
+  Future<void> _submitMaintenance({int? leaseId}) async {
     final descCtrl = TextEditingController();
     final formKey = GlobalKey<FormState>();
 
@@ -266,6 +279,7 @@ class _TenantHomeState extends State<TenantHome>
               try {
                 await TenantPortalService.createMaintenance(
                   description: descCtrl.text.trim(),
+                  leaseId: leaseId,
                 );
                 if (!mounted) return;
                 Navigator.pop(context);
@@ -303,11 +317,19 @@ class _TenantHomeState extends State<TenantHome>
     }
   }
 
-  Future<void> _openPayDialog() async {
-    final d = _asMap(_dashboard);
-    final lease = _asMap(d['lease']);
-    final planner = _asMap(d['planner']);
-    final thisMonth = _asMap(d['this_month']);
+  Future<void> _openPayDialogForRental(Map<String, dynamic> rental) async {
+    final lease = _asMap(rental['lease']).isNotEmpty
+        ? _asMap(rental['lease'])
+        : <String, dynamic>{
+            'id': rental['lease_id'],
+            'rent_amount': rental['rent_amount'],
+            'start_date': rental['start_date'],
+            'end_date': rental['end_date'],
+            'active': rental['active'],
+          };
+
+    final planner = _asMap(rental['planner']);
+    final thisMonth = _asMap(rental['this_month']);
 
     final leaseId = _leaseIdFromMap(lease);
     if (leaseId == null) {
@@ -316,10 +338,7 @@ class _TenantHomeState extends State<TenantHome>
     }
 
     final rows = _asMapList(planner['rows']);
-    final suggestedPeriods =
-        (planner['suggested_periods'] is List ? planner['suggested_periods'] : [])
-            .map((e) => e.toString())
-            .toList();
+    final suggestedPeriods = _asStringList(planner['suggested_periods']);
 
     final prompt = (planner['prompt'] ?? '').toString();
     final expected = _toNum(thisMonth['expected'], 0);
@@ -761,6 +780,486 @@ class _TenantHomeState extends State<TenantHome>
     );
   }
 
+  Widget _heroCard({
+    required String name,
+    required int activeRentals,
+    required String expected,
+    required String received,
+    required String balance,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFF0F172A), Color(0xFF1E3A8A)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(24),
+        boxShadow: [
+          BoxShadow(
+            blurRadius: 20,
+            color: Colors.black.withOpacity(.12),
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Welcome back',
+            style: TextStyle(
+              color: Colors.white70,
+              fontSize: 13,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            name,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 22,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 18),
+          Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            children: [
+              _heroMeta(Icons.home_work_rounded, 'Active Rentals', '$activeRentals'),
+              _heroMeta(Icons.request_quote_rounded, 'Expected', expected),
+              _heroMeta(Icons.payments_rounded, 'Received', received),
+              _heroMeta(Icons.account_balance_wallet_rounded, 'Balance', balance),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _heroMeta(IconData icon, String label, String value) {
+    return Container(
+      width: 180,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(.08),
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: Colors.white70, size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: const TextStyle(color: Colors.white60, fontSize: 12),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  value,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _rentalCard(BuildContext context, ThemeData t, Map<String, dynamic> rental) {
+    final property = _asMap(rental['property']).isNotEmpty
+        ? _asMap(rental['property'])
+        : _asMap(rental['unit']);
+    final unit = _asMap(rental['unit']);
+    final thisMonth = _asMap(rental['this_month']);
+    final planner = _asMap(rental['planner']);
+
+    final leaseId = _leaseIdFromMap(rental);
+    final propertyName =
+        (property['name'] ?? property['property_name'] ?? 'Property').toString();
+    final propertyCode =
+        (property['property_code'] ?? unit['property_code'] ?? '—').toString();
+    final unitNumber =
+        (unit['number'] ?? unit['unit_number'] ?? '—').toString();
+    final rent = _fmtMoney(rental['rent_amount'] ?? thisMonth['expected']);
+    final balance = _fmtMoney(thisMonth['balance']);
+    final paid = _isTrue(thisMonth['paid']);
+    final statusText =
+        (thisMonth['status'] ?? (paid ? 'paid' : 'unpaid')).toString();
+
+    final List<String> suggested = _asStringList(planner['suggested_periods']);
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 14),
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: const Color(0xFFE5E7EB)),
+        boxShadow: [
+          BoxShadow(
+            blurRadius: 16,
+            color: Colors.black.withOpacity(.04),
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Wrap(
+            alignment: WrapAlignment.spaceBetween,
+            runSpacing: 10,
+            spacing: 10,
+            children: [
+              SizedBox(
+                width: 420,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      propertyName,
+                      style: t.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w800,
+                        color: const Color(0xFF0F172A),
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: <Widget>[
+                        _miniBadge(
+                          'Code: $propertyCode',
+                          const Color(0xFFF1F5F9),
+                          const Color(0xFF334155),
+                        ),
+                        _miniBadge(
+                          'Unit: $unitNumber',
+                          const Color(0xFFEFF6FF),
+                          const Color(0xFF1D4ED8),
+                        ),
+                        _miniBadge(
+                          statusText.toUpperCase(),
+                          paid
+                              ? const Color(0xFFECFDF5)
+                              : const Color(0xFFFEF2F2),
+                          paid
+                              ? const Color(0xFF166534)
+                              : const Color(0xFF991B1B),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF8FAFC),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: const Color(0xFFE2E8F0)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'This Month',
+                      style: TextStyle(
+                        color: Color(0xFF64748B),
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Expected: ${_fmtMoney(thisMonth['expected'])}',
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    Text(
+                      'Received: ${_fmtMoney(thisMonth['received'])}',
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    Text(
+                      'Balance: $balance',
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Text(
+            'Rent: $rent',
+            style: const TextStyle(
+              fontWeight: FontWeight.w700,
+              color: Color(0xFF0F172A),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text('Lease Start: ${_fmtDate(rental['start_date'])}'),
+          Text('Lease End: ${_fmtDate(rental['end_date'])}'),
+          if (suggested.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: suggested
+                  .map<Widget>(
+                    (m) => _miniBadge(
+                      'Suggested • ${_prettyMonth(m)}',
+                      const Color(0xFFEFF6FF),
+                      const Color(0xFF1D4ED8),
+                    ),
+                  )
+                  .toList(),
+            ),
+          ],
+          const SizedBox(height: 14),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              FilledButton.icon(
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF1E88E5),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 18,
+                    vertical: 15,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                onPressed: () => _openPayDialogForRental(rental),
+                icon: const Icon(Icons.credit_card_rounded),
+                label: const Text('Pay This Rental'),
+              ),
+              if (leaseId != null)
+                OutlinedButton.icon(
+                  onPressed: () => _openLeaseView(leaseId),
+                  icon: const Icon(Icons.description_outlined),
+                  label: const Text('View Lease'),
+                ),
+              if (leaseId != null)
+                OutlinedButton.icon(
+                  onPressed: () => _downloadLease(leaseId),
+                  icon: const Icon(Icons.picture_as_pdf_outlined),
+                  label: const Text('PDF'),
+                ),
+              if (leaseId != null)
+                OutlinedButton.icon(
+                  onPressed: () => _submitMaintenance(leaseId: leaseId),
+                  icon: const Icon(Icons.build_rounded),
+                  label: const Text('Maintenance'),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _paymentCard(BuildContext context, ThemeData t, Map<String, dynamic> p) {
+    final amount = _fmtMoney(p['amount']);
+    final date = _fmtDate(p['paid_date']);
+    final createdAt = _fmtDateTime(p['created_at']);
+    final ref = (p['reference'] ?? '').toString();
+    final propertyName = (p['property_name'] ?? '—').toString();
+    final unitNumber = (p['unit_number'] ?? '—').toString();
+    final status = (p['status'] ?? 'paid').toString().toLowerCase();
+
+    final notes = _paymentNotesMap(p);
+    final mpesaReceipt = (notes['mpesa_receipt_number'] ?? ref).toString();
+
+    final allocations = _asMapList(p['allocations']);
+
+    final isPaid = status == 'paid';
+    final statusBg = isPaid ? const Color(0xFFECFDF5) : const Color(0xFFFEF2F2);
+    final statusFg = isPaid ? const Color(0xFF166534) : const Color(0xFF991B1B);
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: const Color(0xFFE5E7EB)),
+        boxShadow: [
+          BoxShadow(
+            blurRadius: 16,
+            color: Colors.black.withOpacity(.04),
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Wrap(
+            alignment: WrapAlignment.spaceBetween,
+            runSpacing: 10,
+            spacing: 10,
+            children: [
+              Text(
+                '$propertyName • Unit $unitNumber',
+                style: t.textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                decoration: BoxDecoration(
+                  color: statusBg,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  status.toUpperCase(),
+                  style: TextStyle(
+                    color: statusFg,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text('Amount: $amount'),
+          Text('Paid Date: $date'),
+          Text('Created: $createdAt'),
+          Text('Reference: ${mpesaReceipt.isEmpty ? "—" : mpesaReceipt}'),
+          if (allocations.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: allocations.map((a) {
+                final period = (a['period'] ?? '').toString();
+                final applied = _fmtMoney(a['amount_applied']);
+                return _miniBadge(
+                  '${_prettyMonth(period)} • $applied',
+                  const Color(0xFFF1F5F9),
+                  const Color(0xFF334155),
+                );
+              }).toList(),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _maintenanceCard(BuildContext context, ThemeData t, Map<String, dynamic> m) {
+    final status = (m['status'] ?? 'open').toString();
+    final description = (m['description'] ?? '').toString();
+    final created = _fmtDateTime(m['created_at']);
+    final propertyName = (m['property_name'] ?? '').toString();
+    final unitNumber = (m['unit_number'] ?? '').toString();
+
+    Color chipBg;
+    Color chipFg;
+    switch (status.toLowerCase()) {
+      case 'resolved':
+        chipBg = const Color(0xFFECFDF5);
+        chipFg = const Color(0xFF166534);
+        break;
+      case 'in_progress':
+        chipBg = const Color(0xFFFEF3C7);
+        chipFg = const Color(0xFF92400E);
+        break;
+      default:
+        chipBg = const Color(0xFFEFF6FF);
+        chipFg = const Color(0xFF1D4ED8);
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0xFFE5E7EB)),
+        boxShadow: [
+          BoxShadow(
+            blurRadius: 16,
+            color: Colors.black.withOpacity(.04),
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF8FAFC),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: const Icon(Icons.build_rounded),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  description,
+                  style: t.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                if (propertyName.isNotEmpty || unitNumber.isNotEmpty)
+                  Text(
+                    '${propertyName.isNotEmpty ? propertyName : "Property"}'
+                    '${unitNumber.isNotEmpty ? " • Unit $unitNumber" : ""}',
+                    style: t.textTheme.bodySmall?.copyWith(
+                      color: const Color(0xFF334155),
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                const SizedBox(height: 4),
+                Text(
+                  created,
+                  style: t.textTheme.bodySmall?.copyWith(
+                    color: const Color(0xFF64748B),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+            decoration: BoxDecoration(
+              color: chipBg,
+              borderRadius: BorderRadius.circular(999),
+            ),
+            child: Text(
+              status.toUpperCase(),
+              style: TextStyle(
+                color: chipFg,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context);
@@ -920,24 +1419,22 @@ class _TenantHomeState extends State<TenantHome>
   Widget _dashboardTab(BuildContext context, ThemeData t) {
     final d = _asMap(_dashboard);
     final tenant = _asMap(d['tenant']);
-    final unit = _asMap(d['unit']);
-    final lease = _asMap(d['lease']);
-    final thisMonth = _asMap(d['this_month']);
-    final planner = _asMap(d['planner']);
+    final summary = _asMap(d['summary']);
 
-    final activeLease = _myLeases.isNotEmpty
-        ? _asMap(_myLeases.first)
-        : (lease.isNotEmpty ? lease : <String, dynamic>{});
-    final activeLeaseId = _leaseIdFromMap(activeLease);
+    final activeCount = _toNum(
+      summary['active_rentals_count'] ?? _rentals.length,
+      _rentals.length,
+    ).toInt();
 
-    final unitLabel = (unit['number'] ?? '—').toString();
-    final propertyName = (unit['property_name'] ?? 'Your Property').toString();
-    final rentAmount = _fmtMoney(
-      activeLease['rent_amount'] ?? lease['rent_amount'],
+    final expected = _fmtMoney(
+      summary['this_month_expected'] ?? summary['total_expected'],
     );
-    final paid = _isTrue(thisMonth['paid']);
-    final statusText =
-        (thisMonth['status'] ?? (paid ? 'paid' : 'unpaid')).toString();
+    final received = _fmtMoney(
+      summary['this_month_received'] ?? summary['total_received'],
+    );
+    final balance = _fmtMoney(
+      summary['this_month_balance'] ?? summary['total_balance'],
+    );
 
     return RefreshIndicator(
       onRefresh: _loadAll,
@@ -947,1031 +1444,68 @@ class _TenantHomeState extends State<TenantHome>
         children: <Widget>[
           _heroCard(
             name: (tenant['name'] ?? 'Tenant').toString(),
-            propertyName: propertyName,
-            unitLabel: unitLabel,
-            rentAmount: rentAmount,
-            paid: paid,
-            statusText: statusText,
+            activeRentals: activeCount,
+            expected: expected,
+            received: received,
+            balance: balance,
           ),
           const SizedBox(height: 16),
-          Wrap(
-            spacing: 12,
-            runSpacing: 12,
-            children: <Widget>[
-              _kpiCard(
-                icon: Icons.request_quote_rounded,
-                label: 'Expected',
-                value: _fmtMoney(thisMonth['expected']),
-                accent: const Color(0xFF1D4ED8),
-                soft: const Color(0xFFDBEAFE),
-              ),
-              _kpiCard(
-                icon: Icons.payments_rounded,
-                label: 'Received',
-                value: _fmtMoney(thisMonth['received']),
-                accent: const Color(0xFF047857),
-                soft: const Color(0xFFD1FAE5),
-              ),
-              _kpiCard(
-                icon: Icons.account_balance_wallet_rounded,
-                label: 'Balance',
-                value: _fmtMoney(thisMonth['balance']),
-                accent: const Color(0xFFB45309),
-                soft: const Color(0xFFFEF3C7),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          _plannerCard(t, planner),
-          const SizedBox(height: 16),
-          if (activeLease.isNotEmpty)
-            _leaseCard(
-              context: context,
-              theme: t,
-              activeLease: activeLease,
-              activeLeaseId: activeLeaseId,
-            ),
-          const SizedBox(height: 16),
-          Wrap(
-            spacing: 10,
-            runSpacing: 10,
-            children: <Widget>[
-              FilledButton.icon(
-                style: FilledButton.styleFrom(
-                  backgroundColor: const Color(0xFF1E88E5),
-                  foregroundColor: Colors.white,
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                ),
-                onPressed: _openPayDialog,
-                icon: const Icon(Icons.credit_card_rounded),
-                label: const Text('Pay Rent'),
-              ),
-              OutlinedButton.icon(
-                style: OutlinedButton.styleFrom(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                ),
-                onPressed: _submitMaintenance,
-                icon: const Icon(Icons.build_rounded),
-                label: const Text('Request Maintenance'),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _heroCard({
-    required String name,
-    required String propertyName,
-    required String unitLabel,
-    required String rentAmount,
-    required bool paid,
-    required String statusText,
-  }) {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [Color(0xFF0F172A), Color(0xFF1E3A8A)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(24),
-        boxShadow: [
-          BoxShadow(
-            blurRadius: 20,
-            color: Colors.black.withOpacity(.12),
-            offset: const Offset(0, 8),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Wrap(
-                  runSpacing: 12,
-                  spacing: 12,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(.12),
-                        borderRadius: BorderRadius.circular(18),
-                      ),
-                      child: const Icon(
-                        Icons.apartment_rounded,
-                        color: Colors.white,
-                        size: 30,
-                      ),
-                    ),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Welcome back',
-                          style: TextStyle(
-                            color: Colors.white70,
-                            fontSize: 13,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          name,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 22,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 12),
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                decoration: BoxDecoration(
-                  color: paid
-                      ? Colors.greenAccent.withOpacity(.18)
-                      : Colors.orangeAccent.withOpacity(.18),
-                  borderRadius: BorderRadius.circular(999),
-                  border: Border.all(
-                    color: paid
-                        ? Colors.greenAccent.withOpacity(.25)
-                        : Colors.orangeAccent.withOpacity(.25),
-                  ),
-                ),
-                child: Text(
-                  statusText.toUpperCase(),
-                  style: TextStyle(
-                    color: paid ? Colors.greenAccent : Colors.orangeAccent,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: .6,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 18),
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(.08),
-              borderRadius: BorderRadius.circular(18),
-            ),
-            child: Wrap(
-              spacing: 18,
-              runSpacing: 14,
-              children: [
-                _heroMeta(
-                  Icons.domain_rounded,
-                  'Property',
-                  propertyName,
-                ),
-                _heroMeta(
-                  Icons.meeting_room_rounded,
-                  'Unit',
-                  unitLabel,
-                ),
-                _heroMeta(
-                  Icons.payments_rounded,
-                  'Monthly Rent',
-                  rentAmount,
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _heroMeta(IconData icon, String label, String value) {
-    return SizedBox(
-      width: 180,
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, color: Colors.white70, size: 18),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  label,
-                  style: const TextStyle(color: Colors.white60, fontSize: 12),
-                ),
-                const SizedBox(height: 3),
-                Text(
-                  value,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _kpiCard({
-    required IconData icon,
-    required String label,
-    required String value,
-    required Color accent,
-    required Color soft,
-  }) {
-    return Container(
-      width: 220,
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: const Color(0xFFE5E7EB)),
-        boxShadow: [
-          BoxShadow(
-            blurRadius: 16,
-            color: Colors.black.withOpacity(.04),
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: soft,
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: Icon(icon, color: accent, size: 22),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  label,
-                  style: const TextStyle(
-                    color: Color(0xFF64748B),
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  value,
-                  style: const TextStyle(
-                    color: Color(0xFF0F172A),
-                    fontWeight: FontWeight.w800,
-                    fontSize: 18,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _plannerCard(ThemeData t, Map<String, dynamic> planner) {
-    final rows = _asMapList(planner['rows']);
-    final suggested = (planner['suggested_periods'] is List
-            ? planner['suggested_periods']
-            : <dynamic>[])
-        .map<String>((e) => e.toString())
-        .toList();
-
-    final prompt = (planner['prompt'] ?? '').toString();
-
-    final List<Widget> suggestedWidgets = suggested
-        .map<Widget>(
-          (m) => _miniBadge(
-            'Suggested • ${_prettyMonth(m)}',
-            const Color(0xFFEFF6FF),
-            const Color(0xFF1D4ED8),
-          ),
-        )
-        .toList();
-
-    final List<Widget> rowWidgets = rows
-        .take(6)
-        .map<Widget>((r) {
-          final period = (r['period'] ?? '').toString();
-          final status = (r['status'] ?? '').toString();
-          final expected = _fmtMoney(r['expected']);
-          final received = _fmtMoney(r['received']);
-          final balance = _fmtMoney(r['balance']);
-
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 10),
-            child: Container(
-              padding: const EdgeInsets.all(14),
+          if (_rentals.isEmpty)
+            Container(
+              padding: const EdgeInsets.all(24),
               decoration: BoxDecoration(
-                color: const Color(0xFFFCFCFD),
-                borderRadius: BorderRadius.circular(16),
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(18),
                 border: Border.all(color: const Color(0xFFE5E7EB)),
               ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      _prettyMonth(period),
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w800,
-                        color: Color(0xFF0F172A),
-                      ),
-                    ),
-                  ),
-                  Flexible(
-                    child: Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      alignment: WrapAlignment.end,
-                      children: <Widget>[
-                        _miniBadge(
-                          expected,
-                          const Color(0xFFF1F5F9),
-                          const Color(0xFF334155),
-                        ),
-                        _miniBadge(
-                          'Paid $received',
-                          const Color(0xFFECFDF5),
-                          const Color(0xFF166534),
-                        ),
-                        _miniBadge(
-                          'Balance $balance',
-                          const Color(0xFFFEF2F2),
-                          const Color(0xFF991B1B),
-                        ),
-                        _miniBadge(
-                          status.toUpperCase(),
-                          const Color(0xFFF8FAFC),
-                          const Color(0xFF475569),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          );
-        })
-        .toList();
-
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: const Color(0xFFE5E7EB)),
-        boxShadow: [
-          BoxShadow(
-            blurRadius: 16,
-            color: Colors.black.withOpacity(.04),
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFEFF6FF),
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: const Icon(
-                  Icons.auto_graph_rounded,
-                  color: Color(0xFF1E88E5),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  'Payment Planner',
-                  style: t.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-              ),
-              OutlinedButton.icon(
-                onPressed: _openPayDialog,
-                icon: const Icon(Icons.credit_card_rounded),
-                label: const Text('Pay'),
-              ),
-            ],
-          ),
-          if (prompt.isNotEmpty) ...<Widget>[
-            const SizedBox(height: 14),
-            Container(
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: const Color(0xFFF8FAFC),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: const Color(0xFFE2E8F0)),
-              ),
-              child: Row(
-                children: [
-                  const Icon(
-                    Icons.lightbulb_rounded,
-                    color: Color(0xFF1E88E5),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      prompt,
-                      style: const TextStyle(
-                        height: 1.4,
-                        color: Color(0xFF334155),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-          const SizedBox(height: 14),
-          if (suggestedWidgets.isNotEmpty)
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: suggestedWidgets,
-            ),
-          if (rowWidgets.isNotEmpty) ...<Widget>[
-            const SizedBox(height: 14),
-            ...rowWidgets,
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _leaseCard({
-    required BuildContext context,
-    required ThemeData theme,
-    required Map<String, dynamic> activeLease,
-    required int? activeLeaseId,
-  }) {
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: const Color(0xFFE5E7EB)),
-        boxShadow: [
-          BoxShadow(
-            blurRadius: 16,
-            color: Colors.black.withOpacity(.04),
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFEEF2FF),
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: const Icon(
-                  Icons.description_rounded,
-                  color: Color(0xFF1E40AF),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  'Active Lease',
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-              ),
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                decoration: BoxDecoration(
-                  color: _isTrue(activeLease['active'])
-                      ? const Color(0xFFECFDF5)
-                      : const Color(0xFFFEF2F2),
-                  borderRadius: BorderRadius.circular(999),
-                ),
-                child: Text(
-                  _isTrue(activeLease['active']) ? 'ACTIVE' : 'INACTIVE',
-                  style: TextStyle(
-                    fontWeight: FontWeight.w800,
-                    color: _isTrue(activeLease['active'])
-                        ? const Color(0xFF166534)
-                        : const Color(0xFF991B1B),
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 14),
-          Wrap(
-            spacing: 12,
-            runSpacing: 10,
-            children: [
-              _leaseMetaChip(
-                theme,
-                Icons.payments_rounded,
-                'Rent: ${_fmtMoney(activeLease['rent_amount'])}',
-              ),
-              _leaseMetaChip(
-                theme,
-                Icons.event_rounded,
-                'Start: ${_fmtDate(activeLease['start_date'])}',
-              ),
-              _leaseMetaChip(
-                theme,
-                Icons.event_busy_rounded,
-                'End: ${_fmtDate(activeLease['end_date'])}',
-              ),
-            ],
-          ),
-          if (activeLeaseId != null) ...[
-            const SizedBox(height: 14),
-            Wrap(
-              spacing: 10,
-              runSpacing: 10,
-              children: [
-                FilledButton.icon(
-                  style: FilledButton.styleFrom(
-                    backgroundColor: const Color(0xFF1E88E5),
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                  onPressed: () => _openLeaseView(activeLeaseId),
-                  icon: const Icon(Icons.visibility_rounded),
-                  label: const Text('View Lease'),
-                ),
-                OutlinedButton.icon(
-                  style: OutlinedButton.styleFrom(
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                  onPressed: () => _downloadLease(activeLeaseId),
-                  icon: const Icon(Icons.picture_as_pdf_rounded),
-                  label: const Text('Download PDF'),
-                ),
-              ],
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _leaseMetaChip(ThemeData t, IconData icon, String text) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-      decoration: BoxDecoration(
-        color: t.colorScheme.surfaceContainerHighest.withOpacity(.45),
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 16, color: t.colorScheme.onSurfaceVariant),
-          const SizedBox(width: 6),
-          Text(
-            text,
-            style: t.textTheme.labelMedium?.copyWith(
-              color: t.colorScheme.onSurfaceVariant,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
+              child: const Text('No active rentals found.'),
+            )
+          else
+            ..._rentals.map<Widget>((r) => _rentalCard(context, t, r)).toList(),
         ],
       ),
     );
   }
 
   Widget _paymentsTab(BuildContext context, ThemeData t) {
-    if (_payments.isEmpty) {
-      return Center(
-        child: Container(
-          padding: const EdgeInsets.all(24),
-          margin: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: const Color(0xFFE5E7EB)),
-          ),
-          child: const Text(
-            'No payments yet — your rent history will appear here once you start paying.',
-          ),
-        ),
-      );
-    }
-
     final items = List<Map<String, dynamic>>.from(
       _payments.map(
         (e) => (e is Map) ? e.cast<String, dynamic>() : <String, dynamic>{},
       ),
-    )..sort((a, b) {
-        final aCreated =
-            DateTime.tryParse((a['created_at'] ?? '').toString()) ??
-                DateTime(1970);
-        final bCreated =
-            DateTime.tryParse((b['created_at'] ?? '').toString()) ??
-                DateTime(1970);
-        return bCreated.compareTo(aCreated);
-      });
+    );
 
-    return RefreshIndicator(
-      onRefresh: _loadAll,
-      child: ListView.separated(
-        physics: const AlwaysScrollableScrollPhysics(),
+    if (items.isEmpty) {
+      return ListView(
         padding: const EdgeInsets.all(16),
-        itemCount: items.length,
-        separatorBuilder: (_, __) => const SizedBox(height: 12),
-        itemBuilder: (_, i) {
-          final p = items[i];
-          final period = (p['period'] ?? '').toString();
-          final amount = _fmtMoney(p['amount']);
-          final date = _fmtDate(p['paid_date']);
-          final createdAt = _fmtDateTime(p['created_at']);
-          final ref = (p['reference'] ?? '').toString();
-          final method = (p['payment_method'] ?? 'Payment').toString();
-          final status = (p['status'] ?? 'paid').toString().toLowerCase();
-          final id = (p['id'] as num?)?.toInt();
-          final allocations = _asMapList(p['allocations']);
-
-          final notes = _paymentNotesMap(p);
-          final mpesaReceipt = (notes['mpesa_receipt_number'] ?? ref).toString();
-          final mpesaPhone = (notes['mpesa_phone_number'] ?? '').toString();
-          final mpesaTxTime = (notes['mpesa_transaction_date_iso'] ?? '').toString();
-          final merchantRequestId =
-              (notes['merchant_request_id'] ?? p['merchant_request_id'] ?? '').toString();
-          final checkoutRequestId =
-              (notes['checkout_request_id'] ?? p['checkout_request_id'] ?? '').toString();
-
-          final isPaid = status == 'paid';
-          final statusBg = isPaid
-              ? const Color(0xFFECFDF5)
-              : const Color(0xFFFEF2F2);
-          final statusFg = isPaid
-              ? const Color(0xFF166534)
-              : const Color(0xFF991B1B);
-
-          final List<Widget> allocationWidgets = allocations
-              .map<Widget>(
-                (a) => Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF8FAFC),
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(
-                        color: const Color(0xFFE2E8F0),
-                      ),
-                    ),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            _prettyMonth((a['period'] ?? '').toString()),
-                            style: const TextStyle(
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ),
-                        Text(
-                          _fmtMoney(a['amount_applied']),
-                          style: const TextStyle(
-                            fontWeight: FontWeight.w800,
-                            color: Color(0xFF0F172A),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              )
-              .toList();
-
-          return Container(
-            padding: const EdgeInsets.all(18),
+        children: [
+          Container(
+            padding: const EdgeInsets.all(24),
             decoration: BoxDecoration(
               color: Colors.white,
               borderRadius: BorderRadius.circular(18),
               border: Border.all(color: const Color(0xFFE5E7EB)),
-              boxShadow: [
-                BoxShadow(
-                  blurRadius: 14,
-                  offset: const Offset(0, 3),
-                  color: Colors.black.withOpacity(.04),
-                ),
-              ],
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFE0F2FE),
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                      child: const Icon(
-                        Icons.receipt_long_rounded,
-                        size: 24,
-                        color: Color(0xFF1E88E5),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            amount,
-                            style: t.textTheme.titleMedium?.copyWith(
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            '${_prettyMonth(period)} • $method',
-                            style: t.textTheme.bodySmall?.copyWith(
-                              color: const Color(0xFF64748B),
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 7,
-                      ),
-                      decoration: BoxDecoration(
-                        color: statusBg,
-                        borderRadius: BorderRadius.circular(999),
-                      ),
-                      child: Text(
-                        status.toUpperCase(),
-                        style: TextStyle(
-                          color: statusFg,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: .5,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 14),
-                Wrap(
-                  spacing: 10,
-                  runSpacing: 10,
-                  children: <Widget>[
-                    _metaChip(
-                      Icons.event_available_rounded,
-                      'Paid: $date',
-                    ),
-                    _metaChip(
-                      Icons.schedule_rounded,
-                      'Logged: $createdAt',
-                    ),
-                    _metaChip(
-                      Icons.numbers_rounded,
-                      'Ref: ${mpesaReceipt.isEmpty ? '—' : mpesaReceipt}',
-                    ),
-                    if (mpesaPhone.isNotEmpty)
-                      _metaChip(
-                        Icons.phone_android_rounded,
-                        'Phone: $mpesaPhone',
-                      ),
-                    if (mpesaTxTime.isNotEmpty)
-                      _metaChip(
-                        Icons.access_time_rounded,
-                        'Tx Time: ${_fmtDateTime(mpesaTxTime)}',
-                      ),
-                  ],
-                ),
-                if (merchantRequestId.isNotEmpty || checkoutRequestId.isNotEmpty) ...[
-                  const SizedBox(height: 12),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF8FAFC),
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: const Color(0xFFE2E8F0)),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'M-Pesa Details',
-                          style: TextStyle(
-                            fontWeight: FontWeight.w800,
-                            color: Color(0xFF0F172A),
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        if (merchantRequestId.isNotEmpty)
-                          Text('Merchant Request ID: $merchantRequestId'),
-                        if (checkoutRequestId.isNotEmpty)
-                          Text('Checkout Request ID: $checkoutRequestId'),
-                      ],
-                    ),
-                  ),
-                ],
-                if (allocationWidgets.isNotEmpty) ...<Widget>[
-                  const SizedBox(height: 14),
-                  Text(
-                    'Allocation Breakdown',
-                    style: t.textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  ...allocationWidgets,
-                ],
-                if (isPaid && id != null) ...<Widget>[
-                  const SizedBox(height: 14),
-                  OutlinedButton.icon(
-                    style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 13,
-                      ),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    onPressed: () async {
-                      try {
-                        final bytes =
-                            await PaymentService.downloadReceiptPdf(id);
-                        _showSnack(
-                          'Receipt downloaded: ${bytes.length} bytes',
-                        );
-                      } catch (e) {
-                        _showSnack('Receipt download failed: $e');
-                      }
-                    },
-                    icon: const Icon(Icons.download_rounded),
-                    label: const Text('Receipt (PDF)'),
-                  ),
-                ],
-              ],
-            ),
-          );
-        },
-      ),
-    );
-  }
-
-  Widget _metaChip(IconData icon, String text) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF8FAFC),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: const Color(0xFFE2E8F0)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 15, color: const Color(0xFF64748B)),
-          const SizedBox(width: 6),
-          Text(
-            text,
-            style: const TextStyle(
-              color: Color(0xFF475569),
-              fontWeight: FontWeight.w600,
-              fontSize: 12,
-            ),
+            child: const Text('No payments yet.'),
           ),
         ],
+      );
+    }
+
+    return RefreshIndicator(
+      onRefresh: _loadAll,
+      child: ListView(
+        padding: const EdgeInsets.all(16),
+        children: items.map((p) => _paymentCard(context, t, p)).toList(),
       ),
     );
   }
 
   Widget _maintenanceTab(BuildContext context, ThemeData t) {
-    final List<Widget> ticketWidgets = _tickets.map<Widget>((it) {
-      final m =
-          (it is Map) ? it.cast<String, dynamic>() : <String, dynamic>{};
-      final description =
-          (m['description'] ?? 'Maintenance request').toString();
-      final status = (m['status'] ?? 'open').toString().toLowerCase();
-      final created = _fmtDateTime(m['created_at']);
-
-      final chipBg = (status == 'resolved' || status == 'closed')
-          ? const Color(0xFFECFDF5)
-          : const Color(0xFFEFF6FF);
-      final chipFg = (status == 'resolved' || status == 'closed')
-          ? const Color(0xFF166534)
-          : const Color(0xFF1D4ED8);
-
-      return Padding(
-        padding: const EdgeInsets.only(bottom: 12),
-        child: Container(
-          padding: const EdgeInsets.all(18),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: const Color(0xFFE5E7EB)),
-            boxShadow: [
-              BoxShadow(
-                blurRadius: 14,
-                color: Colors.black.withOpacity(.04),
-                offset: const Offset(0, 3),
-              ),
-            ],
-          ),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFF8FAFC),
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: const Icon(Icons.build_rounded),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      description,
-                      style: t.textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      created,
-                      style: t.textTheme.bodySmall?.copyWith(
-                        color: const Color(0xFF64748B),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 7,
-                ),
-                decoration: BoxDecoration(
-                  color: chipBg,
-                  borderRadius: BorderRadius.circular(999),
-                ),
-                child: Text(
-                  status.toUpperCase(),
-                  style: TextStyle(
-                    color: chipFg,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-    }).toList();
+    final List<Widget> ticketWidgets = List<Map<String, dynamic>>.from(
+      _tickets.map(
+        (e) => (e is Map) ? e.cast<String, dynamic>() : <String, dynamic>{},
+      ),
+    ).map<Widget>((m) => _maintenanceCard(context, t, m)).toList();
 
     return ListView(
       padding: const EdgeInsets.all(16),
@@ -1996,7 +1530,7 @@ class _TenantHomeState extends State<TenantHome>
                   borderRadius: BorderRadius.circular(12),
                 ),
               ),
-              onPressed: _submitMaintenance,
+              onPressed: () => _submitMaintenance(),
               icon: const Icon(Icons.add_rounded),
               label: const Text('New Request'),
             ),
@@ -2110,6 +1644,24 @@ class _TenantHomeState extends State<TenantHome>
             ),
           ),
         ),
+        const SizedBox(height: 16),
+        Text(
+          'My Rentals',
+          style: t.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+        ),
+        const SizedBox(height: 12),
+        if (_rentals.isEmpty)
+          Container(
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: const Color(0xFFE5E7EB)),
+            ),
+            child: const Text('No active rentals found.'),
+          )
+        else
+          ..._rentals.map<Widget>((r) => _rentalCard(context, t, r)).toList(),
       ],
     );
   }

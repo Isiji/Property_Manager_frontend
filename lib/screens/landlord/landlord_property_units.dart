@@ -84,10 +84,13 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
     return '${now.year}-$mm';
   }
 
-  String _todayDate() {
+  DateTime _today() {
     final now = DateTime.now();
-    final d = DateTime(now.year, now.month, now.day);
-    return d.toIso8601String().split('T').first;
+    return DateTime(now.year, now.month, now.day);
+  }
+
+  String _todayDate() {
+    return _today().toIso8601String().split('T').first;
   }
 
   String _fmtMoney(num? n) {
@@ -345,22 +348,9 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
     }
   }
 
-  int? _extractTenantIdFrom409(Object err) {
-    final msg = err.toString();
-    final re = RegExp(r'id=(\d+)');
-    final m = re.firstMatch(msg);
-    if (m != null) return int.tryParse(m.group(1)!);
-
-    try {
-      final json = jsonDecode(msg);
-      if (json is Map) {
-        final detail = (json['detail'] ?? '').toString();
-        final m2 = re.firstMatch(detail);
-        if (m2 != null) return int.tryParse(m2.group(1)!);
-      }
-    } catch (_) {}
-
-    return null;
+  bool _looksNotFound(Object e) {
+    final msg = e.toString().toLowerCase();
+    return msg.contains('404') || msg.contains('tenant not found');
   }
 
   Future<void> _assignTenant(Map<String, dynamic> unit) async {
@@ -377,7 +367,36 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
       final propertyId = _asInt(_property?['id'], widget.propertyId);
       final unitId = _asInt(unit['id']);
 
-      final tenant = await TenantService.createTenant(
+      try {
+        final existing = await TenantService.getByPhone(data.phone);
+        final existingId = _asInt(existing['id'], 0);
+
+        await TenantService.assignExistingTenant(
+          phone: data.phone,
+          unitId: unitId,
+          rentAmount: data.rentAmount,
+          startDate: _today(),
+        );
+
+        await _loadDetailed();
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              existingId > 0
+                  ? 'Existing tenant linked successfully'
+                  : 'Existing tenant assigned successfully',
+            ),
+          ),
+        );
+        return;
+      } catch (existingErr) {
+        if (!_looksNotFound(existingErr)) {
+          rethrow;
+        }
+      }
+
+      await TenantService.createTenant(
         name: data.name,
         phone: data.phone,
         email: (data.email?.trim().isEmpty == true) ? null : data.email,
@@ -387,57 +406,12 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
         idNumber: data.idNumber,
       );
 
-      final tenantMap = _asMap(tenant) ?? <String, dynamic>{};
-      final tenantId = _asInt(tenantMap['id'], 0);
-      if (tenantId <= 0) {
-        throw Exception('Backend did not return tenant id');
-      }
-
-      final today = _todayDate();
-      await LeaseService.createLease(
-        tenantId: tenantId,
-        unitId: unitId,
-        rentAmount: data.rentAmount,
-        startDate: today,
-        active: 1,
-      );
-
       await _loadDetailed();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Tenant assigned and lease created')),
+        const SnackBar(content: Text('New tenant created and assigned')),
       );
     } catch (e) {
-      final existingId = _extractTenantIdFrom409(e);
-      if (existingId != null) {
-        try {
-          final unitId = _asInt(unit['id']);
-          final today = _todayDate();
-
-          await LeaseService.createLease(
-            tenantId: existingId,
-            unitId: unitId,
-            rentAmount: data.rentAmount,
-            startDate: today,
-            active: 1,
-          );
-
-          await _loadDetailed();
-          if (!mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Linked existing tenant (ID=$existingId) and created lease')),
-          );
-          return;
-        } catch (inner) {
-          debugPrint('[PropertyUnits] link existing tenant failed: $inner');
-          if (!mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Failed to link existing tenant: $inner')),
-          );
-          return;
-        }
-      }
-
       debugPrint('[PropertyUnits] assign tenant error: $e');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -448,10 +422,7 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
 
   Future<void> _endLease(Map<String, dynamic> unit) async {
     final lease = _asMap(unit['lease']);
-    final tenant = _asMap(unit['tenant']);
-
     final leaseId = _asInt(lease?['id'], 0);
-    final tenantId = _asInt(tenant?['id'], 0);
 
     if (leaseId <= 0) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -464,7 +435,10 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
       context: context,
       builder: (_) => AlertDialog(
         title: const Text('End Lease'),
-        content: const Text('End current lease, mark unit vacant, and delete the tenant?'),
+        content: const Text(
+          'End current lease and mark this unit vacant?\n\n'
+          'The tenant record will be kept for history and future reassignment.',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -484,14 +458,10 @@ class _LandlordPropertyUnitsState extends State<LandlordPropertyUnits> {
       final today = _todayDate();
       await LeaseService.endLease(leaseId: leaseId, endDate: today);
 
-      if (tenantId > 0) {
-        await TenantService.deleteTenant(tenantId);
-      }
-
       await _loadDetailed();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Lease ended, unit vacated, tenant deleted')),
+        const SnackBar(content: Text('Lease ended and unit marked vacant')),
       );
     } catch (e) {
       debugPrint('[PropertyUnits] end lease error: $e');
@@ -1273,12 +1243,11 @@ class _UnitCard extends StatelessWidget {
                 value: rent,
               ),
               statusChip,
+              monthChip,
             ],
           ),
           const SizedBox(height: 12),
           tenant,
-          const SizedBox(height: 12),
-          monthChip,
         ],
       ),
     );
@@ -1299,7 +1268,6 @@ class _MiniPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context);
-
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
@@ -1311,12 +1279,24 @@ class _MiniPill extends StatelessWidget {
         children: [
           Icon(icon, size: 16),
           const SizedBox(width: 6),
-          Text('$label: ', style: const TextStyle(fontWeight: FontWeight.w700)),
-          Text(value),
+          Text(
+            '$label: $value',
+            style: t.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w700),
+          ),
         ],
       ),
     );
   }
+}
+
+class _UnitData {
+  final String number;
+  final num rentAmount;
+
+  const _UnitData({
+    required this.number,
+    required this.rentAmount,
+  });
 }
 
 class _UnitDialog extends StatefulWidget {
@@ -1351,21 +1331,6 @@ class _UnitDialogState extends State<_UnitDialog> {
     super.dispose();
   }
 
-  void _submit() {
-    if (!_formKey.currentState!.validate()) return;
-
-    final rent = num.tryParse(_rentCtrl.text.trim());
-    if (rent == null) return;
-
-    Navigator.pop(
-      context,
-      _UnitData(
-        number: _numberCtrl.text.trim(),
-        rentAmount: rent.toDouble(),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
@@ -1386,10 +1351,13 @@ class _UnitDialogState extends State<_UnitDialog> {
               const SizedBox(height: 12),
               TextFormField(
                 controller: _rentCtrl,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
                 decoration: const InputDecoration(labelText: 'Rent Amount'),
-                keyboardType: TextInputType.number,
-                validator: (v) =>
-                    (v == null || v.trim().isEmpty) ? 'Rent amount is required' : null,
+                validator: (v) {
+                  if (v == null || v.trim().isEmpty) return 'Rent amount is required';
+                  if (num.tryParse(v.trim()) == null) return 'Enter a valid amount';
+                  return null;
+                },
               ),
             ],
           ),
@@ -1401,7 +1369,16 @@ class _UnitDialogState extends State<_UnitDialog> {
           child: const Text('Cancel'),
         ),
         FilledButton(
-          onPressed: _submit,
+          onPressed: () {
+            if (!_formKey.currentState!.validate()) return;
+            Navigator.pop(
+              context,
+              _UnitData(
+                number: _numberCtrl.text.trim(),
+                rentAmount: num.parse(_rentCtrl.text.trim()),
+              ),
+            );
+          },
           child: const Text('Save'),
         ),
       ],
@@ -1409,13 +1386,31 @@ class _UnitDialogState extends State<_UnitDialog> {
   }
 }
 
+class _AssignTenantData {
+  final String name;
+  final String phone;
+  final String? email;
+  final String? password;
+  final String? idNumber;
+  final num rentAmount;
+
+  const _AssignTenantData({
+    required this.name,
+    required this.phone,
+    this.email,
+    this.password,
+    this.idNumber,
+    required this.rentAmount,
+  });
+}
+
 class _AssignTenantDialog extends StatefulWidget {
   final String unitLabel;
-  final String initialRent;
+  final String? initialRent;
 
   const _AssignTenantDialog({
     required this.unitLabel,
-    required this.initialRent,
+    this.initialRent,
   });
 
   @override
@@ -1424,23 +1419,17 @@ class _AssignTenantDialog extends StatefulWidget {
 
 class _AssignTenantDialogState extends State<_AssignTenantDialog> {
   final _formKey = GlobalKey<FormState>();
-
-  late final TextEditingController _nameCtrl;
-  late final TextEditingController _phoneCtrl;
-  late final TextEditingController _emailCtrl;
-  late final TextEditingController _idCtrl;
-  late final TextEditingController _passwordCtrl;
+  final _nameCtrl = TextEditingController();
+  final _phoneCtrl = TextEditingController();
+  final _emailCtrl = TextEditingController();
+  final _passwordCtrl = TextEditingController();
+  final _idNumberCtrl = TextEditingController();
   late final TextEditingController _rentCtrl;
 
   @override
   void initState() {
     super.initState();
-    _nameCtrl = TextEditingController();
-    _phoneCtrl = TextEditingController();
-    _emailCtrl = TextEditingController();
-    _idCtrl = TextEditingController();
-    _passwordCtrl = TextEditingController();
-    _rentCtrl = TextEditingController(text: widget.initialRent);
+    _rentCtrl = TextEditingController(text: widget.initialRent ?? '');
   }
 
   @override
@@ -1448,81 +1437,67 @@ class _AssignTenantDialogState extends State<_AssignTenantDialog> {
     _nameCtrl.dispose();
     _phoneCtrl.dispose();
     _emailCtrl.dispose();
-    _idCtrl.dispose();
     _passwordCtrl.dispose();
+    _idNumberCtrl.dispose();
     _rentCtrl.dispose();
     super.dispose();
-  }
-
-  void _submit() {
-    if (!_formKey.currentState!.validate()) return;
-
-    final rent = num.tryParse(_rentCtrl.text.trim());
-    if (rent == null) return;
-
-    Navigator.pop(
-      context,
-      _AssignTenantData(
-        name: _nameCtrl.text.trim(),
-        phone: _phoneCtrl.text.trim(),
-        email: _emailCtrl.text.trim().isEmpty ? null : _emailCtrl.text.trim(),
-        password: _passwordCtrl.text.trim().isEmpty ? null : _passwordCtrl.text.trim(),
-        rentAmount: rent,
-        idNumber: _idCtrl.text.trim().isEmpty ? null : _idCtrl.text.trim(),
-      ),
-    );
   }
 
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Text('Assign Tenant · ${widget.unitLabel}'),
+      title: Text('Assign Tenant • ${widget.unitLabel}'),
       content: Form(
         key: _formKey,
         child: SizedBox(
-          width: 430,
+          width: 460,
           child: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 TextFormField(
                   controller: _nameCtrl,
-                  decoration: const InputDecoration(labelText: 'Tenant Name'),
-                  validator: (v) =>
-                      (v == null || v.trim().isEmpty) ? 'Name is required' : null,
+                  decoration: const InputDecoration(
+                    labelText: 'Tenant Name',
+                    helperText: 'Required for new tenant creation',
+                  ),
                 ),
-                const SizedBox(height: 10),
+                const SizedBox(height: 12),
                 TextFormField(
                   controller: _phoneCtrl,
-                  decoration: const InputDecoration(labelText: 'Phone'),
+                  decoration: const InputDecoration(
+                    labelText: 'Phone Number',
+                    helperText: 'If this phone exists, the existing tenant will be assigned',
+                  ),
                   validator: (v) =>
                       (v == null || v.trim().isEmpty) ? 'Phone is required' : null,
                 ),
-                const SizedBox(height: 10),
+                const SizedBox(height: 12),
                 TextFormField(
                   controller: _emailCtrl,
                   decoration: const InputDecoration(labelText: 'Email (optional)'),
                 ),
-                const SizedBox(height: 10),
-                TextFormField(
-                  controller: _idCtrl,
-                  decoration: const InputDecoration(labelText: 'National ID (optional)'),
-                ),
-                const SizedBox(height: 10),
+                const SizedBox(height: 12),
                 TextFormField(
                   controller: _passwordCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Password (recommended for tenant login)',
-                  ),
+                  decoration: const InputDecoration(labelText: 'Password (optional)'),
                   obscureText: true,
                 ),
                 const SizedBox(height: 12),
                 TextFormField(
+                  controller: _idNumberCtrl,
+                  decoration: const InputDecoration(labelText: 'ID Number (optional)'),
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
                   controller: _rentCtrl,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
                   decoration: const InputDecoration(labelText: 'Rent Amount'),
-                  keyboardType: TextInputType.number,
-                  validator: (v) =>
-                      (v == null || v.trim().isEmpty) ? 'Rent amount is required' : null,
+                  validator: (v) {
+                    if (v == null || v.trim().isEmpty) return 'Rent amount is required';
+                    if (num.tryParse(v.trim()) == null) return 'Enter a valid amount';
+                    return null;
+                  },
                 ),
               ],
             ),
@@ -1535,7 +1510,20 @@ class _AssignTenantDialogState extends State<_AssignTenantDialog> {
           child: const Text('Cancel'),
         ),
         FilledButton(
-          onPressed: _submit,
+          onPressed: () {
+            if (!_formKey.currentState!.validate()) return;
+            Navigator.pop(
+              context,
+              _AssignTenantData(
+                name: _nameCtrl.text.trim(),
+                phone: _phoneCtrl.text.trim(),
+                email: _emailCtrl.text.trim().isEmpty ? null : _emailCtrl.text.trim(),
+                password: _passwordCtrl.text.trim().isEmpty ? null : _passwordCtrl.text.trim(),
+                idNumber: _idNumberCtrl.text.trim().isEmpty ? null : _idNumberCtrl.text.trim(),
+                rentAmount: num.parse(_rentCtrl.text.trim()),
+              ),
+            );
+          },
           child: const Text('Assign'),
         ),
       ],
@@ -1568,25 +1556,24 @@ class _PaymentDialogState extends State<_PaymentDialog> {
     super.dispose();
   }
 
-  void _submit() {
-    if (!_formKey.currentState!.validate()) return;
-    final amount = num.tryParse(_amountCtrl.text.trim());
-    if (amount == null) return;
-    Navigator.pop(context, amount);
-  }
-
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
       title: const Text('Record Payment'),
       content: Form(
         key: _formKey,
-        child: TextFormField(
-          controller: _amountCtrl,
-          decoration: const InputDecoration(labelText: 'Amount'),
-          keyboardType: TextInputType.number,
-          validator: (v) =>
-              (v == null || v.trim().isEmpty) ? 'Amount is required' : null,
+        child: SizedBox(
+          width: 380,
+          child: TextFormField(
+            controller: _amountCtrl,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: const InputDecoration(labelText: 'Amount'),
+            validator: (v) {
+              if (v == null || v.trim().isEmpty) return 'Amount is required';
+              if (num.tryParse(v.trim()) == null) return 'Enter a valid amount';
+              return null;
+            },
+          ),
         ),
       ),
       actions: [
@@ -1595,38 +1582,13 @@ class _PaymentDialogState extends State<_PaymentDialog> {
           child: const Text('Cancel'),
         ),
         FilledButton(
-          onPressed: _submit,
+          onPressed: () {
+            if (!_formKey.currentState!.validate()) return;
+            Navigator.pop(context, num.parse(_amountCtrl.text.trim()));
+          },
           child: const Text('Save'),
         ),
       ],
     );
   }
-}
-
-class _AssignTenantData {
-  final String name;
-  final String phone;
-  final String? email;
-  final String? password;
-  final num rentAmount;
-  final String? idNumber;
-
-  _AssignTenantData({
-    required this.name,
-    required this.phone,
-    this.email,
-    this.password,
-    required this.rentAmount,
-    this.idNumber,
-  });
-}
-
-class _UnitData {
-  final String number;
-  final double rentAmount;
-
-  _UnitData({
-    required this.number,
-    required this.rentAmount,
-  });
 }

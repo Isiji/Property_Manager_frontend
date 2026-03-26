@@ -1,3 +1,4 @@
+// lib/services/tenant_portal_service.dart
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:property_manager_frontend/core/config.dart';
@@ -22,6 +23,7 @@ class TenantPortalService {
     final h = await TokenManager.authHeaders();
     final url = _uri('/tenants/me/overview');
     final r = await http.get(url, headers: _json(h));
+
     if (r.statusCode == 200) {
       final b = jsonDecode(r.body);
       return (b is Map) ? b.cast<String, dynamic>() : <String, dynamic>{};
@@ -33,6 +35,7 @@ class TenantPortalService {
     final h = await TokenManager.authHeaders();
     final url = _uri('/tenants/me/payments');
     final r = await http.get(url, headers: _json(h));
+
     if (r.statusCode == 200) {
       final b = jsonDecode(r.body);
       return (b is List) ? b : const [];
@@ -44,6 +47,7 @@ class TenantPortalService {
     final h = await TokenManager.authHeaders();
     final url = _uri('/tenants/me/maintenance');
     final r = await http.get(url, headers: _json(h));
+
     if (r.statusCode == 200) {
       final b = jsonDecode(r.body);
       return (b is List) ? b : const [];
@@ -53,10 +57,15 @@ class TenantPortalService {
 
   static Future<Map<String, dynamic>> createMaintenance({
     required String description,
+    int? leaseId,
   }) async {
     final h = await TokenManager.authHeaders();
     final url = Uri.parse('${AppConfig.apiBaseUrl}/tenants/me/maintenance');
-    final body = {'description': description};
+    final body = {
+      'description': description,
+      if (leaseId != null) 'lease_id': leaseId,
+    };
+
     final r = await http.post(url, headers: _json(h), body: jsonEncode(body));
     if (r.statusCode == 201 || r.statusCode == 200) {
       final b = jsonDecode(r.body);
@@ -69,6 +78,7 @@ class TenantPortalService {
     final h = await TokenManager.authHeaders();
     final url = _uri('/tenants/me/profile');
     final r = await http.get(url, headers: _json(h));
+
     if (r.statusCode == 200) {
       final b = jsonDecode(r.body);
       return (b is Map) ? b.cast<String, dynamic>() : <String, dynamic>{};
