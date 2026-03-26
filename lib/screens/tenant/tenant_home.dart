@@ -531,33 +531,38 @@ class _TenantHomeState extends State<TenantHome>
       }
     }
 
-    Future<void> pollForPaymentUpdate() async {
-      for (int i = 0; i < 8; i++) {
-        await Future.delayed(const Duration(seconds: 3));
-        try {
-          await _loadAll();
+  Future<void> pollForPaymentUpdate() async {
+    for (int i = 0; i < 8; i++) {
+      await Future.delayed(const Duration(seconds: 3));
+      try {
+        final pays = await TenantPortalService.getPayments();
+        _payments = pays;
 
-          final items = List<Map<String, dynamic>>.from(
-            _payments.map(
-              (e) => (e is Map) ? e.cast<String, dynamic>() : <String, dynamic>{},
-            ),
-          );
+        final items = List<Map<String, dynamic>>.from(
+          _payments.map(
+            (e) => (e is Map) ? e.cast<String, dynamic>() : <String, dynamic>{},
+          ),
+        );
 
-          final recent = items.isNotEmpty ? items.first : null;
-          if (recent != null) {
-            final status = (recent['status'] ?? '').toString().toLowerCase();
-            final ref = (recent['reference'] ?? '').toString();
-            if (status == 'paid' || ref.isNotEmpty) {
-              if (mounted) {
-                _showSnack('Payment confirmed successfully.');
-              }
-              return;
+        final recent = items.isNotEmpty ? items.first : null;
+        if (recent != null) {
+          final status = (recent['status'] ?? '').toString().toLowerCase();
+          final ref = (recent['reference'] ?? '').toString();
+
+          if (status == 'paid' || ref.isNotEmpty) {
+            if (mounted) {
+              setState(() {});
+              _showSnack('Payment confirmed successfully.');
             }
-          }
-        } catch (_) {}
-      }
-    }
 
+            // refresh everything only once after confirmation
+            await _loadAll();
+            return;
+          }
+        }
+      } catch (_) {}
+    }
+  }
     await showDialog(
       context: context,
       barrierDismissible: !processing,
