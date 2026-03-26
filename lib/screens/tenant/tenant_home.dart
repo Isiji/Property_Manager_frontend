@@ -1,11 +1,18 @@
-//lib/screens/tenant/tenant_home.dart
-import 'dart:convert';
+// lib/screens/tenant/tenant_home.dart
+// ignore_for_file: avoid_web_libraries_in_flutter
 
+import 'dart:convert';
+import 'dart:typed_data';
+import 'dart:html' as html;
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
+import 'package:property_manager_frontend/core/config.dart';
+import 'package:property_manager_frontend/services/payment_service.dart';
 import 'package:property_manager_frontend/services/tenant_portal_service.dart';
 import 'package:property_manager_frontend/services/tenant_service.dart';
-import 'package:property_manager_frontend/services/payment_service.dart';
 import 'package:property_manager_frontend/utils/token_manager.dart';
 import 'package:property_manager_frontend/services/lease_service.dart';
 
@@ -26,6 +33,9 @@ class _TenantHomeState extends State<TenantHome>
   List<dynamic> _tickets = const [];
   List<dynamic> _myLeases = const [];
   List<Map<String, dynamic>> _rentals = const [];
+  List<Map<String, dynamic>> _notifications = const [];
+  int _unreadNotificationCount = 0;
+  String _notificationFilter = 'all';
 
   final _nameCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
@@ -35,7 +45,7 @@ class _TenantHomeState extends State<TenantHome>
   @override
   void initState() {
     super.initState();
-    _tab = TabController(length: 4, vsync: this);
+    _tab = TabController(length: 5, vsync: this);
     _loadAll();
   }
 
@@ -71,7 +81,8 @@ class _TenantHomeState extends State<TenantHome>
         if (rentalsRaw is List) {
           _rentals = rentalsRaw
               .map<Map<String, dynamic>>(
-                (e) => e is Map ? e.cast<String, dynamic>() : <String, dynamic>{},
+                (e) =>
+                    e is Map ? e.cast<String, dynamic>() : <String, dynamic>{},
               )
               .toList();
         } else {
@@ -117,6 +128,8 @@ class _TenantHomeState extends State<TenantHome>
         _idCtrl.text = (tenant['id_number'] ?? '').toString();
       } catch (_) {}
 
+      await _loadNotifications(silent: true);
+
       if (mounted) setState(() {});
     } finally {
       if (mounted) setState(() => _loading = false);
@@ -161,6 +174,18 @@ class _TenantHomeState extends State<TenantHome>
 
   int? _leaseIdFromMap(Map<String, dynamic> lease) {
     final raw = lease['id'] ?? lease['lease_id'];
+    if (raw is num) return raw.toInt();
+    return int.tryParse(raw?.toString() ?? '');
+  }
+
+  int? _paymentIdFromMap(Map<String, dynamic> payment) {
+    final raw = payment['id'] ?? payment['payment_id'];
+    if (raw is num) return raw.toInt();
+    return int.tryParse(raw?.toString() ?? '');
+  }
+
+  int? _notificationIdFromMap(Map<String, dynamic> n) {
+    final raw = n['id'] ?? n['notification_id'];
     if (raw is num) return raw.toInt();
     return int.tryParse(raw?.toString() ?? '');
   }
@@ -226,6 +251,47 @@ class _TenantHomeState extends State<TenantHome>
     return <String, dynamic>{};
   }
 
+  Future<Map<String, String>> _authHeaders() async {
+    final headers = await TokenManager.authHeaders();
+    return {
+      'Content-Type': 'application/json',
+      ...headers,
+    };
+  }
+
+  Future<void> _downloadProtectedPdf({
+    required String path,
+    required String filename,
+    String successMessage = 'Download started',
+  }) async {
+    try {
+      final headers = await _authHeaders();
+      final url = Uri.parse('${AppConfig.apiBaseUrl}$path');
+
+      final res = await http.get(url, headers: headers);
+
+      if (res.statusCode != 200) {
+        throw Exception('HTTP ${res.statusCode}: ${res.body}');
+      }
+
+      if (kIsWeb) {
+        final bytes = Uint8List.fromList(res.bodyBytes);
+        final blob = html.Blob([bytes], 'application/pdf');
+        final objectUrl = html.Url.createObjectUrlFromBlob(blob);
+        final anchor = html.AnchorElement(href: objectUrl)
+          ..setAttribute('download', filename)
+          ..click();
+        html.Url.revokeObjectUrl(objectUrl);
+        _showSnack(successMessage);
+        return;
+      }
+
+      throw Exception('PDF download is currently configured for web only.');
+    } catch (e) {
+      _showSnack('Download failed: $e');
+    }
+  }
+
   Future<void> _openLeaseView(int leaseId) async {
     await Navigator.pushNamed(
       context,
@@ -236,11 +302,100 @@ class _TenantHomeState extends State<TenantHome>
   }
 
   Future<void> _downloadLease(int leaseId) async {
+    await _downloadProtectedPdf(
+      path: '/leases/$leaseId/pdf',
+      filename: 'lease_$leaseId.pdf',
+      successMessage: 'Lease download started',
+    );
+  }
+
+  Future<void> _downloadReceipt(int paymentId) async {
+    await _downloadProtectedPdf(
+      path: '/payments/receipt/$paymentId/pdf',
+      filename: 'receipt_$paymentId.pdf',
+      successMessage: 'Receipt download started',
+    );
+  }
+
+  Future<void> _loadNotifications({bool silent = false}) async {
     try {
-      await LeaseService.downloadLeasePdf(leaseId);
-      _showSnack('Lease download started');
+      final headers = await _authHeaders();
+
+      final unreadUrl =
+          Uri.parse('${AppConfig.apiBaseUrl}/notifications/unread_count');
+      final unreadRes = await http.get(unreadUrl, headers: headers);
+      if (unreadRes.statusCode == 200) {
+        final data = jsonDecode(unreadRes.body);
+        _unreadNotificationCount = (data['count'] ?? 0) as int;
+      }
+
+      String typeQuery = '';
+      if (_notificationFilter != 'all') {
+        typeQuery = '?type=$_notificationFilter';
+      }
+
+      final url =
+          Uri.parse('${AppConfig.apiBaseUrl}/notifications$typeQuery');
+      final res = await http.get(url, headers: headers);
+
+      if (res.statusCode == 200) {
+        final decoded = jsonDecode(res.body);
+        if (decoded is List) {
+          _notifications = decoded
+              .map<Map<String, dynamic>>(
+                (e) =>
+                    e is Map ? e.cast<String, dynamic>() : <String, dynamic>{},
+              )
+              .toList();
+        } else {
+          _notifications = const [];
+        }
+      } else {
+        throw Exception('HTTP ${res.statusCode}');
+      }
+
+      if (mounted) setState(() {});
     } catch (e) {
-      _showSnack('Lease download failed: $e');
+      if (!silent) {
+        _showSnack('Failed to load notifications: $e');
+      }
+    }
+  }
+
+  Future<void> _markNotificationRead(int notifId) async {
+    try {
+      final headers = await _authHeaders();
+      final url =
+          Uri.parse('${AppConfig.apiBaseUrl}/notifications/$notifId/read');
+
+      final res = await http.put(url, headers: headers);
+
+      if (res.statusCode == 200) {
+        await _loadNotifications(silent: true);
+      } else {
+        throw Exception('HTTP ${res.statusCode}');
+      }
+    } catch (e) {
+      _showSnack('Failed to mark notification read: $e');
+    }
+  }
+
+  Future<void> _markAllNotificationsRead() async {
+    try {
+      final headers = await _authHeaders();
+      final url =
+          Uri.parse('${AppConfig.apiBaseUrl}/notifications/mark_all_read');
+
+      final res = await http.post(url, headers: headers);
+
+      if (res.statusCode == 200) {
+        await _loadNotifications(silent: true);
+        _showSnack('All notifications marked as read');
+      } else {
+        throw Exception('HTTP ${res.statusCode}');
+      }
+    } catch (e) {
+      _showSnack('Failed to mark all notifications read: $e');
     }
   }
 
@@ -287,6 +442,7 @@ class _TenantHomeState extends State<TenantHome>
                 _showSnack('Request submitted');
                 final m = await TenantPortalService.getMaintenance();
                 setState(() => _tickets = m);
+                await _loadNotifications(silent: true);
               } catch (e) {
                 _showSnack('Submit failed: $e');
               }
@@ -877,7 +1033,11 @@ class _TenantHomeState extends State<TenantHome>
     );
   }
 
-  Widget _rentalCard(BuildContext context, ThemeData t, Map<String, dynamic> rental) {
+  Widget _rentalCard(
+    BuildContext context,
+    ThemeData t,
+    Map<String, dynamic> rental,
+  ) {
     final property = _asMap(rental['property']).isNotEmpty
         ? _asMap(rental['property'])
         : _asMap(rental['unit']);
@@ -1058,7 +1218,7 @@ class _TenantHomeState extends State<TenantHome>
                 OutlinedButton.icon(
                   onPressed: () => _downloadLease(leaseId),
                   icon: const Icon(Icons.picture_as_pdf_outlined),
-                  label: const Text('PDF'),
+                  label: const Text('Lease PDF'),
                 ),
               if (leaseId != null)
                 OutlinedButton.icon(
@@ -1074,6 +1234,7 @@ class _TenantHomeState extends State<TenantHome>
   }
 
   Widget _paymentCard(BuildContext context, ThemeData t, Map<String, dynamic> p) {
+    final paymentId = _paymentIdFromMap(p);
     final amount = _fmtMoney(p['amount']);
     final date = _fmtDate(p['paid_date']);
     final createdAt = _fmtDateTime(p['created_at']);
@@ -1084,7 +1245,6 @@ class _TenantHomeState extends State<TenantHome>
 
     final notes = _paymentNotesMap(p);
     final mpesaReceipt = (notes['mpesa_receipt_number'] ?? ref).toString();
-
     final allocations = _asMapList(p['allocations']);
 
     final isPaid = status == 'paid';
@@ -1157,12 +1317,30 @@ class _TenantHomeState extends State<TenantHome>
               }).toList(),
             ),
           ],
+          if (isPaid && paymentId != null) ...[
+            const SizedBox(height: 14),
+            Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: [
+                OutlinedButton.icon(
+                  onPressed: () => _downloadReceipt(paymentId),
+                  icon: const Icon(Icons.download_rounded),
+                  label: const Text('Receipt PDF'),
+                ),
+              ],
+            ),
+          ],
         ],
       ),
     );
   }
 
-  Widget _maintenanceCard(BuildContext context, ThemeData t, Map<String, dynamic> m) {
+  Widget _maintenanceCard(
+    BuildContext context,
+    ThemeData t,
+    Map<String, dynamic> m,
+  ) {
     final status = (m['status'] ?? 'open').toString();
     final description = (m['description'] ?? '').toString();
     final created = _fmtDateTime(m['created_at']);
@@ -1254,6 +1432,110 @@ class _TenantHomeState extends State<TenantHome>
                 color: chipFg,
                 fontWeight: FontWeight.w800,
               ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _notificationCard(
+    BuildContext context,
+    ThemeData t,
+    Map<String, dynamic> n,
+  ) {
+    final notifId = _notificationIdFromMap(n);
+    final title = (n['title'] ?? 'Notification').toString();
+    final message = (n['message'] ?? '').toString();
+    final createdAt = _fmtDateTime(n['created_at']);
+    final isRead = _isTrue(n['is_read']);
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: isRead ? Colors.white : const Color(0xFFF8FBFF),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: isRead ? const Color(0xFFE5E7EB) : const Color(0xFFBFDBFE),
+        ),
+        boxShadow: [
+          BoxShadow(
+            blurRadius: 16,
+            color: Colors.black.withOpacity(.04),
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: isRead
+                  ? const Color(0xFFF1F5F9)
+                  : const Color(0xFFE0F2FE),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(
+              isRead ? Icons.notifications_none : Icons.notifications_active,
+              color: isRead
+                  ? const Color(0xFF64748B)
+                  : const Color(0xFF1D4ED8),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        title,
+                        style: t.textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                    if (!isRead)
+                      _miniBadge(
+                        'NEW',
+                        const Color(0xFFDBEAFE),
+                        const Color(0xFF1D4ED8),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  message.isEmpty ? '—' : message,
+                  style: t.textTheme.bodyMedium?.copyWith(
+                    color: const Color(0xFF334155),
+                    height: 1.4,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  createdAt,
+                  style: t.textTheme.bodySmall?.copyWith(
+                    color: const Color(0xFF64748B),
+                  ),
+                ),
+                if (!isRead && notifId != null) ...[
+                  const SizedBox(height: 10),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: OutlinedButton.icon(
+                      onPressed: () => _markNotificationRead(notifId),
+                      icon: const Icon(Icons.done_rounded),
+                      label: const Text('Mark Read'),
+                    ),
+                  ),
+                ],
+              ],
             ),
           ),
         ],
@@ -1362,6 +1644,7 @@ class _TenantHomeState extends State<TenantHome>
                       ),
                       child: TabBar(
                         controller: _tab,
+                        isScrollable: true,
                         dividerColor: Colors.transparent,
                         indicatorSize: TabBarIndicatorSize.tab,
                         indicator: BoxDecoration(
@@ -1374,20 +1657,26 @@ class _TenantHomeState extends State<TenantHome>
                           fontWeight: FontWeight.w700,
                           fontSize: 13,
                         ),
-                        tabs: const [
-                          Tab(
+                        tabs: [
+                          const Tab(
                             text: 'Dashboard',
                             icon: Icon(Icons.dashboard_customize_rounded, size: 18),
                           ),
-                          Tab(
+                          const Tab(
                             text: 'Payments',
                             icon: Icon(Icons.receipt_long_rounded, size: 18),
                           ),
-                          Tab(
+                          const Tab(
                             text: 'Maintenance',
                             icon: Icon(Icons.build_rounded, size: 18),
                           ),
                           Tab(
+                            text: _unreadNotificationCount > 0
+                                ? 'Notifications ($_unreadNotificationCount)'
+                                : 'Notifications',
+                            icon: const Icon(Icons.notifications_rounded, size: 18),
+                          ),
+                          const Tab(
                             text: 'Profile',
                             icon: Icon(Icons.person_rounded, size: 18),
                           ),
@@ -1407,6 +1696,7 @@ class _TenantHomeState extends State<TenantHome>
                         _dashboardTab(context, t),
                         _paymentsTab(context, t),
                         _maintenanceTab(context, t),
+                        _notificationsTab(context, t),
                         _profileTab(context, t),
                       ],
                     ),
@@ -1551,6 +1841,88 @@ class _TenantHomeState extends State<TenantHome>
         else
           ...ticketWidgets,
       ],
+    );
+  }
+
+  Widget _notificationsTab(BuildContext context, ThemeData t) {
+    return RefreshIndicator(
+      onRefresh: () => _loadNotifications(),
+      child: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Notifications',
+                  style: t.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              OutlinedButton.icon(
+                onPressed: _markAllNotificationsRead,
+                icon: const Icon(Icons.done_all_rounded),
+                label: const Text('Mark All Read'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              ChoiceChip(
+                label: const Text('All'),
+                selected: _notificationFilter == 'all',
+                onSelected: (_) async {
+                  setState(() => _notificationFilter = 'all');
+                  await _loadNotifications();
+                },
+              ),
+              ChoiceChip(
+                label: const Text('Payments'),
+                selected: _notificationFilter == 'payment',
+                onSelected: (_) async {
+                  setState(() => _notificationFilter = 'payment');
+                  await _loadNotifications();
+                },
+              ),
+              ChoiceChip(
+                label: const Text('Maintenance'),
+                selected: _notificationFilter == 'maintenance',
+                onSelected: (_) async {
+                  setState(() => _notificationFilter = 'maintenance');
+                  await _loadNotifications();
+                },
+              ),
+              ChoiceChip(
+                label: const Text('System'),
+                selected: _notificationFilter == 'system',
+                onSelected: (_) async {
+                  setState(() => _notificationFilter = 'system');
+                  await _loadNotifications();
+                },
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          if (_notifications.isEmpty)
+            Container(
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: const Color(0xFFE5E7EB)),
+              ),
+              child: const Text('No notifications yet.'),
+            )
+          else
+            ..._notifications
+                .map<Widget>((n) => _notificationCard(context, t, n))
+                .toList(),
+        ],
+      ),
     );
   }
 
