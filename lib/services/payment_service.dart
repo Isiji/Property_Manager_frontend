@@ -17,6 +17,14 @@ class PaymentService {
     return {'detail': body};
   }
 
+  static List<dynamic> _tryDecodeList(String body) {
+    try {
+      final v = jsonDecode(body);
+      if (v is List) return v;
+    } catch (_) {}
+    return <dynamic>[];
+  }
+
   static String _errMsg(http.Response res) {
     final m = _tryDecodeMap(res.body);
     final d = (m['detail'] ?? m['message'] ?? res.body).toString();
@@ -49,7 +57,28 @@ class PaymentService {
       out.add(period.trim());
     }
 
-    return out;
+    final seen = <String>{};
+    final ordered = <String>[];
+
+    for (final p in out) {
+      if (!seen.contains(p)) {
+        seen.add(p);
+        ordered.add(p);
+      }
+    }
+
+    ordered.sort();
+    return ordered;
+  }
+
+  static Future<Map<String, String>> _headers({
+    bool includeJsonContentType = true,
+  }) async {
+    final auth = await TokenManager.authHeaders();
+    return {
+      if (includeJsonContentType) 'Content-Type': 'application/json',
+      ...auth,
+    };
   }
 
   // -----------------------------
@@ -63,7 +92,7 @@ class PaymentService {
     List<String>? periods,
     String? notes,
   }) async {
-    final headers = await TokenManager.authHeaders();
+    final headers = await _headers();
     final url = Uri.parse('${AppConfig.apiBaseUrl}/payments/mpesa/initiate');
 
     final normalizedPeriods = _normalizePeriods(period: period, periods: periods);
@@ -77,11 +106,12 @@ class PaymentService {
     }..removeWhere((k, v) => v == null);
 
     print('[PaymentService] POST $url');
+    print('[PaymentService] headers: $headers');
     print('[PaymentService] payload: ${jsonEncode(payload)}');
 
     final res = await http.post(
       url,
-      headers: {'Content-Type': 'application/json', ...headers},
+      headers: headers,
       body: jsonEncode(payload),
     );
 
@@ -90,28 +120,57 @@ class PaymentService {
   }
 
   // -----------------------------
-  // Reports / Payment status
+  // Optional: check a payment by id
+  // -----------------------------
+  static Future<Map<String, dynamic>> getPaymentReceiptJson(int paymentId) async {
+    final headers = await _headers();
+    final url = Uri.parse(
+      '${AppConfig.apiBaseUrl}/payments/receipt/$paymentId',
+    );
+
+    print('[PaymentService] GET $url');
+    final res = await http.get(url, headers: headers);
+
+    print('[PaymentService] ← ${res.statusCode} ${res.body}');
+    return _decodeMapOrEmpty(res);
+  }
+
+  // -----------------------------
+  // Optional: get property payment status report
   // -----------------------------
   static Future<Map<String, dynamic>> getStatusByProperty({
     required int propertyId,
     required String period,
   }) async {
-    final headers = await TokenManager.authHeaders();
+    final headers = await _headers();
     final url = Uri.parse(
       '${AppConfig.apiBaseUrl}/reports/property/$propertyId/status?period=$period',
     );
 
     print('[PaymentService] GET $url');
-    final res = await http.get(
-      url,
-      headers: {
-        'Content-Type': 'application/json',
-        ...headers,
-      },
-    );
+    final res = await http.get(url, headers: headers);
 
     print('[PaymentService] ← ${res.statusCode} ${res.body}');
     return _decodeMapOrEmpty(res);
+  }
+
+  // -----------------------------
+  // Optional: get payments by lease if backend supports it
+  // -----------------------------
+  static Future<List<dynamic>> listPaymentsByLease(int leaseId) async {
+    final headers = await _headers();
+    final url = Uri.parse(
+      '${AppConfig.apiBaseUrl}/payments/lease/$leaseId',
+    );
+
+    print('[PaymentService] GET $url');
+    final res = await http.get(url, headers: headers);
+
+    print('[PaymentService] ← ${res.statusCode} ${res.body}');
+    if (res.statusCode == 200) {
+      return _tryDecodeList(res.body);
+    }
+    throw Exception(_errMsg(res));
   }
 
   // -----------------------------
@@ -128,7 +187,7 @@ class PaymentService {
     String? period,
     List<String>? periods,
   }) async {
-    final headers = await TokenManager.authHeaders();
+    final headers = await _headers();
     final url = Uri.parse('${AppConfig.apiBaseUrl}/payments/record');
 
     final normalizedPeriods = _normalizePeriods(period: period, periods: periods);
@@ -145,11 +204,12 @@ class PaymentService {
     }..removeWhere((k, v) => v == null);
 
     print('[PaymentService] POST $url');
+    print('[PaymentService] headers: $headers');
     print('[PaymentService] payload: ${jsonEncode(payload)}');
 
     final res = await http.post(
       url,
-      headers: {'Content-Type': 'application/json', ...headers},
+      headers: headers,
       body: jsonEncode(payload),
     );
 
@@ -164,7 +224,7 @@ class PaymentService {
     required int leaseId,
     required String message,
   }) async {
-    final headers = await TokenManager.authHeaders();
+    final headers = await _headers();
     final url = Uri.parse('${AppConfig.apiBaseUrl}/payments/reminder');
 
     final payload = {
@@ -173,9 +233,12 @@ class PaymentService {
     };
 
     print('[PaymentService] POST $url');
+    print('[PaymentService] headers: $headers');
+    print('[PaymentService] payload: ${jsonEncode(payload)}');
+
     final res = await http.post(
       url,
-      headers: {'Content-Type': 'application/json', ...headers},
+      headers: headers,
       body: jsonEncode(payload),
     );
 
@@ -192,7 +255,7 @@ class PaymentService {
     required String message,
     String? period,
   }) async {
-    final headers = await TokenManager.authHeaders();
+    final headers = await _headers();
     final url = Uri.parse('${AppConfig.apiBaseUrl}/payments/reminders/bulk');
 
     final payload = {
@@ -202,9 +265,12 @@ class PaymentService {
     }..removeWhere((k, v) => v == null);
 
     print('[PaymentService] POST $url');
+    print('[PaymentService] headers: $headers');
+    print('[PaymentService] payload: ${jsonEncode(payload)}');
+
     final res = await http.post(
       url,
-      headers: {'Content-Type': 'application/json', ...headers},
+      headers: headers,
       body: jsonEncode(payload),
     );
 
@@ -220,16 +286,15 @@ class PaymentService {
   // Receipt PDF
   // -----------------------------
   static Future<Uint8List> downloadReceiptPdf(int paymentId) async {
-    final headers = await TokenManager.authHeaders();
+    final headers = await _headers(includeJsonContentType: false);
     final url = Uri.parse(
       '${AppConfig.apiBaseUrl}/payments/receipt/$paymentId/pdf',
     );
 
     print('[PaymentService] GET $url');
-    final res = await http.get(
-      url,
-      headers: {...headers},
-    );
+    print('[PaymentService] headers: $headers');
+
+    final res = await http.get(url, headers: headers);
 
     print('[PaymentService] ← ${res.statusCode}');
     if (res.statusCode == 200) {
@@ -241,5 +306,45 @@ class PaymentService {
     } catch (_) {}
 
     throw Exception('Failed to download receipt PDF: ${_errMsg(res)}');
+  }
+
+  // -----------------------------
+  // Lease PDF
+  // -----------------------------
+  static Future<Uint8List> downloadLeasePdf(int leaseId) async {
+    final headers = await _headers(includeJsonContentType: false);
+
+    final candidates = <Uri>[
+      Uri.parse('${AppConfig.apiBaseUrl}/leases/$leaseId/pdf'),
+      Uri.parse('${AppConfig.apiBaseUrl}/leases/$leaseId.pdf'),
+    ];
+
+    Exception? lastError;
+
+    for (final url in candidates) {
+      try {
+        print('[PaymentService] GET $url');
+        print('[PaymentService] headers: $headers');
+
+        final res = await http.get(url, headers: headers);
+
+        print('[PaymentService] ← ${res.statusCode}');
+        if (res.statusCode == 200) {
+          return res.bodyBytes;
+        }
+
+        try {
+          print('[PaymentService] body: ${res.body}');
+        } catch (_) {}
+
+        lastError = Exception(
+          'Failed to download lease PDF: ${_errMsg(res)}',
+        );
+      } catch (e) {
+        lastError = Exception('Failed to download lease PDF: $e');
+      }
+    }
+
+    throw lastError ?? Exception('Failed to download lease PDF');
   }
 }

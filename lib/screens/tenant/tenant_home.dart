@@ -13,8 +13,8 @@ import 'package:property_manager_frontend/core/config.dart';
 import 'package:property_manager_frontend/services/payment_service.dart';
 import 'package:property_manager_frontend/services/tenant_portal_service.dart';
 import 'package:property_manager_frontend/services/tenant_service.dart';
-import 'package:property_manager_frontend/utils/token_manager.dart';
 import 'package:property_manager_frontend/services/lease_service.dart';
+import 'package:property_manager_frontend/utils/token_manager.dart';
 
 class TenantHome extends StatefulWidget {
   const TenantHome({super.key});
@@ -278,7 +278,7 @@ class _TenantHomeState extends State<TenantHome>
         final bytes = Uint8List.fromList(res.bodyBytes);
         final blob = html.Blob([bytes], 'application/pdf');
         final objectUrl = html.Url.createObjectUrlFromBlob(blob);
-        final anchor = html.AnchorElement(href: objectUrl)
+        html.AnchorElement(href: objectUrl)
           ..setAttribute('download', filename)
           ..click();
         html.Url.revokeObjectUrl(objectUrl);
@@ -521,6 +521,17 @@ class _TenantHomeState extends State<TenantHome>
       );
     }
 
+    String paymentHint(num enteredAmount, num suggestedAmount) {
+      if (enteredAmount <= 0) return 'Enter amount';
+      if (enteredAmount < suggestedAmount) {
+        return 'This will be recorded as a partial payment.';
+      }
+      if (enteredAmount > suggestedAmount) {
+        return 'Extra amount will be recorded as credit/excess payment.';
+      }
+      return 'This matches the selected balance exactly.';
+    }
+
     void syncAmountIfNotManual(void Function(void Function()) setLocal) {
       final suggestedAmount = calcSuggestedAmount(selected);
       if (!amountManuallyEdited) {
@@ -531,38 +542,37 @@ class _TenantHomeState extends State<TenantHome>
       }
     }
 
-  Future<void> pollForPaymentUpdate() async {
-    for (int i = 0; i < 8; i++) {
-      await Future.delayed(const Duration(seconds: 3));
-      try {
-        final pays = await TenantPortalService.getPayments();
-        _payments = pays;
+    Future<void> pollForPaymentUpdate() async {
+      for (int i = 0; i < 8; i++) {
+        await Future.delayed(const Duration(seconds: 3));
+        try {
+          final pays = await TenantPortalService.getPayments();
+          _payments = pays;
 
-        final items = List<Map<String, dynamic>>.from(
-          _payments.map(
-            (e) => (e is Map) ? e.cast<String, dynamic>() : <String, dynamic>{},
-          ),
-        );
+          final items = List<Map<String, dynamic>>.from(
+            _payments.map(
+              (e) => (e is Map) ? e.cast<String, dynamic>() : <String, dynamic>{},
+            ),
+          );
 
-        final recent = items.isNotEmpty ? items.first : null;
-        if (recent != null) {
-          final status = (recent['status'] ?? '').toString().toLowerCase();
-          final ref = (recent['reference'] ?? '').toString();
+          final recent = items.isNotEmpty ? items.first : null;
+          if (recent != null) {
+            final status = (recent['status'] ?? '').toString().toLowerCase();
+            final ref = (recent['reference'] ?? '').toString();
 
-          if (status == 'paid' || ref.isNotEmpty) {
-            if (mounted) {
-              setState(() {});
-              _showSnack('Payment confirmed successfully.');
+            if (status == 'paid' || ref.isNotEmpty) {
+              if (mounted) {
+                setState(() {});
+                _showSnack('Payment confirmed successfully.');
+              }
+              await _loadAll();
+              return;
             }
-
-            // refresh everything only once after confirmation
-            await _loadAll();
-            return;
           }
-        }
-      } catch (_) {}
+        } catch (_) {}
+      }
     }
-  }
+
     await showDialog(
       context: context,
       barrierDismissible: !processing,
@@ -577,6 +587,8 @@ class _TenantHomeState extends State<TenantHome>
               0,
               (sum, r) => sum + _toNum(r['balance'], 0),
             );
+
+            final enteredAmount = num.tryParse(amountCtrl.text.trim()) ?? 0;
 
             return AlertDialog(
               shape: RoundedRectangleBorder(
@@ -654,7 +666,8 @@ class _TenantHomeState extends State<TenantHome>
                                   final received = _toNum(row['received'], 0);
                                   final expected = _toNum(row['expected'], 0);
                                   final checked = selected.contains(period);
-                                  final selectable = balance > 0 || checked;
+                                  final isCleared = balance <= 0;
+                                  final selectable = !isCleared || checked;
 
                                   return InkWell(
                                     borderRadius: BorderRadius.circular(14),
@@ -669,7 +682,11 @@ class _TenantHomeState extends State<TenantHome>
                                             });
                                             syncAmountIfNotManual(setLocal);
                                           }
-                                        : null,
+                                        : () {
+                                            _showSnack(
+                                              '${_prettyMonth(period)} is already fully paid. Choose another month.',
+                                            );
+                                          },
                                     child: Container(
                                       padding: const EdgeInsets.all(12),
                                       decoration: BoxDecoration(
@@ -730,13 +747,13 @@ class _TenantHomeState extends State<TenantHome>
                                                     _miniBadge(
                                                       balance > 0
                                                           ? 'Balance ${_fmtMoney(balance)}'
-                                                          : 'Cleared',
+                                                          : 'Fully Paid',
                                                       balance > 0
                                                           ? const Color(0xFFFEF2F2)
-                                                          : const Color(0xFFEFF6FF),
+                                                          : const Color(0xFFECFDF5),
                                                       balance > 0
                                                           ? const Color(0xFF991B1B)
-                                                          : const Color(0xFF1D4ED8),
+                                                          : const Color(0xFF166534),
                                                     ),
                                                     _miniBadge(
                                                       status.toUpperCase(),
@@ -791,6 +808,11 @@ class _TenantHomeState extends State<TenantHome>
                                   : selected.map(_prettyMonth).join(', '),
                               style: const TextStyle(color: Color(0xFF475569)),
                             ),
+                            const SizedBox(height: 8),
+                            Text(
+                              paymentHint(enteredAmount, suggestedAmount),
+                              style: const TextStyle(color: Color(0xFF475569)),
+                            ),
                           ],
                         ),
                       ),
@@ -802,6 +824,7 @@ class _TenantHomeState extends State<TenantHome>
                         ),
                         onChanged: (_) {
                           amountManuallyEdited = true;
+                          setLocal(() {});
                         },
                         decoration: InputDecoration(
                           labelText: 'Amount to pay',
@@ -900,7 +923,7 @@ class _TenantHomeState extends State<TenantHome>
                               'STK sent. Ref: ${res['checkout_request_id'] ?? '—'}',
                             );
 
-                            await _loadAll();
+                            // do not hard refresh immediately; poll lightly
                             await pollForPaymentUpdate();
                           } catch (e) {
                             setLocal(() => processing = false);
@@ -1315,7 +1338,7 @@ class _TenantHomeState extends State<TenantHome>
                 final period = (a['period'] ?? '').toString();
                 final applied = _fmtMoney(a['amount_applied']);
                 return _miniBadge(
-                  '${_prettyMonth(period)} • $applied',
+                  '$period • $applied',
                   const Color(0xFFF1F5F9),
                   const Color(0xFF334155),
                 );
